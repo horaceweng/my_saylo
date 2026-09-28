@@ -292,6 +292,21 @@
 - 後端：`feed` 資料表新增 `kind`（news／podcast）與 `image`，舊資料庫啟動時自動補上（舊訂閱都是 news）；`/api/podcasts/channels`（GET／POST）、`/channels/{id}`（DELETE）、`/channels/{id}/episodes`；單一音檔連結不能追蹤；新聞與 Podcast 的訂閱互不影響
 - 測試：後端 261 個、前端 78 個；瀏覽器實測 BBC 6 Minute English：追蹤、頻道與集數顯示、不再追蹤、由貼上網址再追蹤（目前這個頻道已留在你的清單裡）
 
+**追加：Colab 批次語音辨識＋翻譯（獨立功能，2026-09-28）**
+- 動機：大量教材（不同等級 × 影片／Podcast）要做語音辨識和翻譯，用 Colab 的免費 GPU 跑，離線完成後匯入主系統，不佔用自己電腦資源，跟主系統平常的處理流程完全獨立
+- 教材清單 `scripts/materials/materials.csv`：A2/B1/B2/C1+ 四個等級 × 影片／Podcast 各 20 份，共 160 筆，全部是真實查證過的來源（不是編造的連結）——影片：VOA「Let's Learn English」(A2)、BBC「Real Easy English」(B1)、BBC「Learning English from the News」(B2)、TED-Ed (C1+)，皆用 `yt-dlp --flat-playlist` 驗證過播放清單真的存在；Podcast：VOA「Health & Lifestyle」(A2)、VOA「As It Is」(B1)、BBC「6 Minute English」(B2)、NPR「Up First」(C1+)，皆下載過真實 RSS 並驗證音檔網址回應 `audio/mpeg`
+- 抓取過程修正了兩個真實踩到的問題（見 `scripts/materials/README.md`）：VOA 的 RSS `<enclosure>` 其實是縮圖不是音檔，要另外抓文章頁面裡的 `voa-audio.voanews.eu` 網址；部分 YouTube 影片因為 yt-dlp 預設 client 遇到 SABR／JS challenge 回報「not available」，改用 `--extractor-args youtube:player_client=android` 解決
+- Colab 筆記本 `colab/batch_transcribe_translate.ipynb`：`git clone` repo 後直接重用 `services/segmenter.py`、`hallucination.py`、`chunked.py`、`prompts.py`（純 Python，不依賴資料庫／FastAPI／mlx，跟本機處理同一套規則），GPU 用 faster-whisper（預設 `large-v3-turbo`，跟主系統本機同一個模型）轉逐字稿；每處理完一項就存進 Google Drive，重新執行會跳過已完成的項目，斷線不會重來
+- 匯入端：`backend/app/services/batch_import.py`（`parse_item`／`import_item`，資料格式錯誤會擋下並說明原因；同一個影片或集數的連結已存在就跳過，不會重複）＋ `backend/scripts/import_batch.py`（CLI：`uv run python scripts/import_batch.py <資料夾>`，遞迴找 `*.json` 逐一匯入並印出成功／略過／失敗統計）
+- 測試：後端新增 11 個（`test_batch_import.py`），全部通過（後端共 323 個）；額外用假資料驗證了分句＋幻聽過濾＋長音檔分段的重用邏輯、批次翻譯＋缺漏句子單獨重試的邏輯；`import_batch.py` 對著真實暫存資料庫跑過（匯入、重複略過、壞檔案回報錯誤、跨兩次執行結果一致）；用真實網路請求驗證了所有 160 筆素材的音訊／影片連結可以下載
+- 未驗證：Colab 上的語音辨識與翻譯本身完全沒有實際跑過（沒有 GPU），辨識準確度、qwen3:8b 翻譯品質、整個流程跑起來順不順仍需要使用者自己在 Colab 上執行第一批才能確認；YouTube 的反機器人措施可能隨時再變化
+
+**修正：翻譯改在 Colab 本機跑 Ollama + qwen3:8b，不叫雲端 API（2026-09-28）**
+- 使用者要求：「既然是用 colab 的雲端，當然也要利用它來跑 ollama」——筆記本不再需要雲端 API 金鑰，改成安裝 Ollama、下載 qwen3:8b，直接重用主系統的 `app.services.llm.OllamaProvider` 與 `chat_json`，確保是原生 `/api/chat`、`think: false`（跟主系統最早踩過的坑一樣：OpenAI 相容介面會忽略 `think: false`，同一句從 2 秒變 47 秒，所以直接重用同一份程式碼而不是重寫）
+- Whisper 模型改成預設 `large-v3-turbo`（原本筆記本預設 `large-v3`）：跟主系統本機同一個模型，準確又比 `large-v3` 快、VRAM 用量小很多，讓免費 T4（16 GB）能同時載入 qwen3:8b（約 5 GB）+ `large-v3-turbo`（約 1.5 GB）
+- 測試：用假的 Ollama HTTP 回應驗證了 `OllamaProvider` + `chat_json` 的批次翻譯與缺漏句子單獨重試邏輯，並確認送出的請求是 `think: false`、走 `/api/chat`
+- 未驗證：Ollama 在 Colab 上的安裝、GPU 偵測、qwen3:8b 實際跑起來的翻譯品質和速度，完全沒有實測過
+
 **追加：書與新聞朗讀（2026-09-26）**
 - 書和新聞閱讀器可以朗讀：章節頂端「🔊 朗讀這一章／這篇文章」（從畫面上第一段開始）、每段的「🔊 從這裡朗讀」。朗讀時正在念的句子淡黃底、正在念的字深黃底，自動捲動跟著走；下方控制列有上一段／暫停／繼續／下一段／停止與速度（0.7–1.3×）；讀完一章會接著讀下一章；離開頁面或換章就停止
 - 用瀏覽器內建的語音（Web Speech API）：免費、離線、不經過後端，沒有新的相依套件。設定頁新增「朗讀」：選聲音、速度、試聽；預設自動挑最好的英文聲音（優先 Premium／Enhanced、美式、本機）。想要更自然的聲音：macOS 系統設定 → 輔助使用 → 朗讀內容 → 系統語音 → 管理語音，下載進階／Premium 英文語音
