@@ -305,7 +305,7 @@
 - 使用者要求：「既然是用 colab 的雲端，當然也要利用它來跑 ollama」——筆記本不再需要雲端 API 金鑰，改成安裝 Ollama、下載 qwen3:8b，直接重用主系統的 `app.services.llm.OllamaProvider` 與 `chat_json`，確保是原生 `/api/chat`、`think: false`（跟主系統最早踩過的坑一樣：OpenAI 相容介面會忽略 `think: false`，同一句從 2 秒變 47 秒，所以直接重用同一份程式碼而不是重寫）
 - Whisper 模型改成預設 `large-v3-turbo`（原本筆記本預設 `large-v3`）：跟主系統本機同一個模型，準確又比 `large-v3` 快、VRAM 用量小很多，讓免費 T4（16 GB）能同時載入 qwen3:8b（約 5 GB）+ `large-v3-turbo`（約 1.5 GB）
 - 測試：用假的 Ollama HTTP 回應驗證了 `OllamaProvider` + `chat_json` 的批次翻譯與缺漏句子單獨重試邏輯，並確認送出的請求是 `think: false`、走 `/api/chat`
-- 未驗證：Ollama 在 Colab 上的安裝、GPU 偵測、qwen3:8b 實際跑起來的翻譯品質和速度，完全沒有實測過
+- 未驗證：Ollama 在 Colab 上的安裝、GPU 偵測、qwen3:8b 實際跑起來的翻譯品質和速度，完全沒有實測過；實際跑的時候發現 Colab 影像缺少 `zstd`，Ollama 官方安裝腳本解壓縮會失敗（`ollama` 執行檔沒裝成功，導致 `ollama serve` 報 `FileNotFoundError`），已在安裝那一格加上 `zstd`，並加一行安裝後檢查
 
 **追加：書與新聞朗讀（2026-09-26）**
 - 書和新聞閱讀器可以朗讀：章節頂端「🔊 朗讀這一章／這篇文章」（從畫面上第一段開始）、每段的「🔊 從這裡朗讀」。朗讀時正在念的句子淡黃底、正在念的字深黃底，自動捲動跟著走；下方控制列有上一段／暫停／繼續／下一段／停止與速度（0.7–1.3×）；讀完一章會接著讀下一章；離開頁面或換章就停止

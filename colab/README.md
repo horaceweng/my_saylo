@@ -45,7 +45,7 @@ qwen3:8b 約 5 GB，兩個同時載入在 T4 上完全沒問題。如果想換�
 - **YouTube 反機器人措施**：下載時遇過「This video is not available」，其實是 yt-dlp 的預設用戶端被擋，改用
   `player_client=android` 解決了；筆記本已經套用這個修正，但這是 yt-dlp 和 YouTube 之間常態性的攻防，
   之後可能又需要調整（見 `scripts/materials/README.md`）。
-- **Ollama 安裝、語音辨識與翻譯本身沒有實際跑過**：我沒有 GPU，無法在 Colab 上實測。純邏輯的部分
+- **Ollama 安裝、語音辨識與翻譯本身沒有實際跑過**（已知一個坑：這台 Colab 映像檔預設沒裝 `zstd`，Ollama 官方安裝腳本需要它來解壓縮，沒裝會讓 `ollama` 執行檔沒裝成功，之後 `ollama serve` 報 `FileNotFoundError: ollama`；已在第 5 節的安裝格加上 `zstd`）：我沒有 GPU，無法在 Colab 上實測。純邏輯的部分
   （分句、幻聽過濾、批次翻譯重試、跟 Ollama 溝通的請求格式、音訊下載指令）都用假資料或真實的下載測試過，
   可以放心；但辨識準不準、qwen3:8b 翻譯品質好不好、整個流程順不順，要你自己跑過第一批才知道，建議先設
   `MAX_ITEMS_PER_LEVEL_TYPE = 2` 試跑。
