@@ -45,7 +45,11 @@ qwen3:8b 約 5 GB，兩個同時載入在 T4 上完全沒問題。如果想換�
 - **YouTube 反機器人措施**：下載時遇過「This video is not available」，其實是 yt-dlp 的預設用戶端被擋，改用
   `player_client=android` 解決了；筆記本已經套用這個修正，但這是 yt-dlp 和 YouTube 之間常態性的攻防，
   之後可能又需要調整（見 `scripts/materials/README.md`）。
-- **Ollama 安裝、語音辨識與翻譯本身沒有實際跑過**（已知一個坑：這台 Colab 映像檔預設沒裝 `zstd`，Ollama 官方安裝腳本需要它來解壓縮，沒裝會讓 `ollama` 執行檔沒裝成功，之後 `ollama serve` 報 `FileNotFoundError: ollama`；已在第 5 節的安裝格加上 `zstd`）：我沒有 GPU，無法在 Colab 上實測。純邏輯的部分
+- **實測踩過的三個坑，都已修好**：
+  1. 存結果的那一格少 `import json`，語音辨識和翻譯明明成功了，最後一步存檔卻失敗——已修好。
+  2. VOA 的音檔連結對 Python `httpx` 預設的 User-Agent 回 403（不是被擋 IP，本機測試同一個預設 UA 也一樣 403，換成瀏覽器 UA 就正常）——已加上瀏覽器 UA。
+  3. 這台 Colab 映像檔預設沒裝 `zstd`，Ollama 官方安裝腳本需要它來解壓縮，沒裝會讓 `ollama` 執行檔沒裝成功——已在安裝格加上 `zstd`。
+- **YouTube 下載目前全部失敗，原因還不確定**：`yt-dlp` 回報「exit status 1」但看不到實際原因（`--quiet` 加上沒有擷取錯誤輸出），已經改成會直接印出 yt-dlp 的錯誤訊息，下次執行才能看出真正原因。最有可能是 Colab 所在的 Google Cloud IP 段被 YouTube 的反機器人機制擋下（跟本機不同網路環境的常見問題），這點我這邊沒有 Colab 的網路環境無法重現，需要看到實際錯誤訊息才能判斷下一步。：我沒有 GPU，無法在 Colab 上實測。純邏輯的部分
   （分句、幻聽過濾、批次翻譯重試、跟 Ollama 溝通的請求格式、音訊下載指令）都用假資料或真實的下載測試過，
   可以放心；但辨識準不準、qwen3:8b 翻譯品質好不好、整個流程順不順，要你自己跑過第一批才知道，建議先設
   `MAX_ITEMS_PER_LEVEL_TYPE = 2` 試跑。
