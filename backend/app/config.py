@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=BASE_DIR / ".env", extra="ignore")
 
     ollama_base_url: str = "http://localhost:11434"
-    llm_model: str = "qwen3.5:9b"
+    llm_model: str = "qwen3:8b"
     whisper_model: str = "mlx-community/whisper-large-v3-turbo"
     data_dir: Path = BASE_DIR / "data"
 

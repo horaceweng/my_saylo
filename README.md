@@ -6,7 +6,7 @@
 ## 需要先安裝
 
 - Python 3.12 + [uv](https://docs.astral.sh/uv/)、Node 22、ffmpeg、yt-dlp、espeak-ng（`brew install espeak-ng`，自然語音朗讀用）
-- [Ollama](https://ollama.com)，並下載一個模型：`ollama pull qwen3.5:9b`
+- [Ollama](https://ollama.com)，並下載一個模型：`ollama pull qwen3:8b`
 - 第一次使用前建立字典：`cd backend && uv sync && uv run python scripts/import_ecdict.py`
 
 ## 執行
