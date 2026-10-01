@@ -85,3 +85,15 @@ def test_an_item_with_no_sentences_at_all_is_refused(session):
 def test_a_missing_title_gets_a_placeholder_rather_than_being_blank(session):
     media = import_item(session, parse_item({**PODCAST, "title": ""}))
     assert media.title and media.title != ""
+
+
+def test_imported_media_is_graded_like_a_book(session):
+    from app.services.grading import grade as compute_grade
+
+    easy = {**VIDEO, "segments": [{"text": "The cat sat on the mat.", "start": 0.0, "end": 2.0}]}
+    hard = {**PODCAST, "source_url": "https://a.com/hard.mp3",
+            "segments": [{"text": "Notwithstanding the ostensibly perfunctory adjudication, the plaintiff's counsel remained circumspect.", "start": 0.0, "end": 5.0}]}
+    easy_media = import_item(session, parse_item(easy))
+    hard_media = import_item(session, parse_item(hard))
+    assert easy_media.level == compute_grade(["The cat sat on the mat."])[0]
+    assert hard_media.score > easy_media.score

@@ -1,13 +1,16 @@
 import { useState } from 'react'
 import { api } from '../api/client'
+import type { BookLevel } from '../api/types'
 import MediaCard from '../components/MediaCard'
 import { useMediaList } from '../hooks/useMediaList'
+import { LEVELS, countByLevel, filterByLevel } from '../lib/books'
 
 export default function VideoList() {
   const { items, error: listError, refresh } = useMediaList('video')
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [level, setLevel] = useState<BookLevel | 'all'>('all')
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -23,6 +26,9 @@ export default function VideoList() {
       setBusy(false)
     }
   }
+
+  const counts = countByLevel(items ?? [])
+  const shown = filterByLevel(items ?? [], level)
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-8">
@@ -42,8 +48,24 @@ export default function VideoList() {
       {(error || listError) && <p className="mb-4 rounded-lg bg-rose-50 p-3 text-rose-600 dark:bg-rose-500/10">{error || listError}</p>}
       {!items && !listError && <p className="py-12 text-center text-slate-400">載入中…</p>}
       {items?.length === 0 && <p className="py-12 text-center text-slate-400">還沒有影片，貼上網址開始吧</p>}
+      {items && items.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {(['all', ...LEVELS] as const).map((value) => (
+            <button
+              key={value}
+              onClick={() => setLevel(value)}
+              aria-pressed={level === value}
+              className={`rounded-full px-3 py-1 text-sm ${level === value ? 'bg-indigo-600 text-white' : 'bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600'}`}
+            >
+              {value === 'all' ? `全部 ${items.length}` : `${value} ${counts[value]}`}
+            </button>
+          ))}
+          <span className="text-xs text-slate-400">難度是估計值（生字比例＋句長），處理完才會顯示</span>
+        </div>
+      )}
+      {items && items.length > 0 && shown.length === 0 && <p className="py-12 text-center text-slate-400">沒有 {level} 等級的影片</p>}
       <div className="grid gap-4 sm:grid-cols-2">
-        {items?.map((m) => <MediaCard key={m.id} media={m} onChanged={refresh} />)}
+        {shown.map((m) => <MediaCard key={m.id} media={m} onChanged={refresh} />)}
       </div>
     </main>
   )

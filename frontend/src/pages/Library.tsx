@@ -56,12 +56,15 @@ function PodcastTab() {
   const [channelShow, setChannelShow] = useState<PodcastShow | null>(null)
   const [loadingChannel, setLoadingChannel] = useState(false)
   const [following, setFollowing] = useState(false)
+  const [level, setLevel] = useState<BookLevel | 'all'>('all')
   const [error, setError] = useState('')
   const [showAll, setShowAll] = useState(false)
   const [busyUrls, setBusyUrls] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const loaded = new Set(items?.map((m) => m.source_url))
+  const counts = countByLevel(items ?? [])
+  const shown = filterByLevel(items ?? [], level)
   // What the episode list shows: a link just looked up, or else the selected channel
   const currentChannel = result === null ? channels?.find((c) => c.id === channelId) ?? null : null
   const show: PodcastShow | null = result?.type === 'feed' ? result : currentChannel ? channelShow : null
@@ -260,8 +263,24 @@ function PodcastTab() {
       <h2 className="mb-3 text-lg font-semibold">我的 Podcast</h2>
       {!items && !listError && <p className="py-8 text-center text-slate-400">載入中…</p>}
       {items?.length === 0 && <p className="py-8 text-center text-slate-400">還沒有載入任何 Podcast，貼上網址或上傳音檔開始吧</p>}
+      {items && items.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {(['all', ...LEVELS] as const).map((value) => (
+            <button
+              key={value}
+              onClick={() => setLevel(value)}
+              aria-pressed={level === value}
+              className={`rounded-full px-3 py-1 text-sm ${level === value ? 'bg-indigo-600 text-white' : 'bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600'}`}
+            >
+              {value === 'all' ? `全部 ${items.length}` : `${value} ${counts[value]}`}
+            </button>
+          ))}
+          <span className="text-xs text-slate-400">難度是估計值（生字比例＋句長），處理完才會顯示</span>
+        </div>
+      )}
+      {items && items.length > 0 && shown.length === 0 && <p className="py-8 text-center text-slate-400">沒有 {level} 等級的 Podcast</p>}
       <div className="grid gap-4 sm:grid-cols-2">
-        {items?.map((m) => <MediaCard key={m.id} media={m} onChanged={refresh} />)}
+        {shown.map((m) => <MediaCard key={m.id} media={m} onChanged={refresh} />)}
       </div>
     </div>
   )

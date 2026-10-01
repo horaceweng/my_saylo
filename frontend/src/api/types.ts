@@ -13,6 +13,8 @@ export interface Media {
   error: string
   /** Every part of the audio has been turned into sentences. */
   transcribed: boolean
+  /** Estimated difficulty, set once the transcript is ready ('' before then). */
+  level: BookLevel | ''
   sentence_count: number
   translated_count: number
   /** How far into the audio the transcript reaches, in seconds. */

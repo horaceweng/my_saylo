@@ -14,6 +14,8 @@ _LATER_COLUMNS = [
     ("media", "transcribed", "BOOLEAN NOT NULL DEFAULT 0",
      # Videos processed before this column existed were transcribed in one go.
      "UPDATE media SET transcribed = 1 WHERE status IN ('translating', 'ready')"),
+    ("media", "level", "VARCHAR NOT NULL DEFAULT ''", None),
+    ("media", "score", "FLOAT NOT NULL DEFAULT 0", None),
     ("book", "url", "VARCHAR NOT NULL DEFAULT ''", None),
     ("book", "published", "VARCHAR NOT NULL DEFAULT ''", None),
     ("book", "site", "VARCHAR NOT NULL DEFAULT ''", None),

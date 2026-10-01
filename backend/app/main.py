@@ -23,6 +23,9 @@ async def lifespan(_: FastAPI):
     regraded = books.regrade_all(engine)
     if regraded:
         log.info("graded %d saved books/articles again (new grading method)", regraded)
+    regraded_media = media.regrade_media(engine)
+    if regraded_media:
+        log.info("graded %d saved videos/podcasts again (new grading method)", regraded_media)
     recut = resegment.resegment_all(engine)
     if recut:
         log.info("cut the sentences of videos %s again (new rules); their new sentences are being translated", recut)

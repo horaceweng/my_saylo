@@ -7,8 +7,9 @@ from sqlalchemy import case
 from sqlmodel import Session, delete, func, select
 
 from app.db import get_session
-from app.models import Media, Segment, Word
+from app.models import Media, Segment, Setting, Word
 from app.services import pipeline, youtube
+from app.services.grading import GRADING_VERSION, grade
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 
@@ -19,6 +20,26 @@ class CreateMedia(BaseModel):
 
 class Focus(BaseModel):
     idx: int
+
+
+def regrade_media(engine) -> int:
+    """Grade every finished video and podcast again when the grading method has changed since they were
+    graded (see services/grading.py). Returns how many were updated (0 when everything is up to date)."""
+    with Session(engine) as session:
+        marker = session.get(Setting, "media_grading_version")
+        if marker and marker.value == GRADING_VERSION:
+            return 0
+        updated = 0
+        for media in session.exec(select(Media).where(Media.status == "ready")).all():
+            texts = session.exec(select(Segment.text).where(Segment.media_id == media.id).order_by(Segment.idx)).all()
+            level, score, _ = grade(texts)
+            if (media.level, media.score) != (level, score):
+                media.level, media.score = level, score
+                session.add(media)
+                updated += 1
+        session.merge(Setting(key="media_grading_version", value=GRADING_VERSION))
+        session.commit()
+        return updated
 
 
 def media_stats(session: Session, ids: list[int]) -> dict[int, dict]:

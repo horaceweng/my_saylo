@@ -4,7 +4,7 @@ import { formatDuration, isProcessing, mediaPath, statusText } from './mediaStat
 
 const media = (over: Partial<Media>): Media => ({
   id: 7, kind: 'video', source_url: '', external_id: '', title: 'T', thumbnail: '', duration: 0, status: 'ready', progress: 100, error: '',
-  transcribed: true, sentence_count: 0, translated_count: 0, covered_until: 0, playable: true, ...over,
+  transcribed: true, level: '', sentence_count: 0, translated_count: 0, covered_until: 0, playable: true, ...over,
 })
 
 describe('mediaPath', () => {

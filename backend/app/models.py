@@ -20,6 +20,8 @@ class Media(SQLModel, table=True):
     progress: int = 0  # 0-100
     error: str = ""
     transcribed: bool = False  # every part of the audio has been turned into sentences
+    level: str = ""  # estimated difficulty (A2/B1/B2/C1+), set once the transcript is ready
+    score: float = 0.0
     created_at: datetime = Field(default_factory=_now)
 
 

@@ -134,6 +134,9 @@ def test_a_fresh_job_transcribes_in_pieces_and_ends_with_every_sentence_translat
     assert [s.idx for s in segs] == list(range(13))
     assert all(s.translation == f"譯:{s.text}" for s in segs)
     assert sorted(t for batch in calls["translated"] for t in batch) == sorted(s.text for s in segs)  # each translated once
+    from app.services.grading import grade as compute_grade
+
+    assert media.level == compute_grade([s.text for s in segs])[0]  # graded the same way as books, once it is ready
 
 
 def test_the_first_sentences_are_translated_before_the_rest_is_even_transcribed(job):

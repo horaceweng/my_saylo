@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from sqlmodel import Session, select
 
 from app.models import Media, Segment, Word
+from app.services.grading import grade
 from app.services.youtube import extract_video_id
 
 
@@ -102,10 +103,11 @@ def import_item(session: Session, item: ImportItem) -> Media | None:
 
     external_id = _external_id(item)
     duration = item.duration or item.segments[-1].end
+    level, score, _ = grade(seg.text for seg in item.segments)
     media = Media(
         kind=item.kind, source_url=item.source_url, external_id=external_id,
         title=item.title or f"（未命名，{item.kind}）", thumbnail=_thumbnail(item, external_id),
-        duration=duration, status="ready", progress=100, transcribed=True,
+        duration=duration, status="ready", progress=100, transcribed=True, level=level, score=score,
     )
     session.add(media)
     session.flush()  # media.id is needed for the segments below

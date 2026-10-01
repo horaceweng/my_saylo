@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import type { Media } from '../api/types'
+import { LEVEL_STYLES } from '../lib/books'
 import { formatDuration, isProcessing, mediaPath, statusText } from '../lib/mediaStatus'
 
 /** One video or podcast in the library: cover, title, how far processing is, retry and delete. */
@@ -24,6 +25,11 @@ export default function MediaCard({ media, onChanged }: { media: Media; onChange
         <p className="line-clamp-2 font-medium">{media.title}</p>
         <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <span className={color}>{statusText(media)}</span>
+          {media.level && (
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${LEVEL_STYLES[media.level]}`} title="難度是估計值，依生字比例與句子長度計算" data-level>
+              {media.level}
+            </span>
+          )}
           {media.duration > 0 && <span className="text-slate-400">{formatDuration(media.duration)}</span>}
           <span className="ml-auto flex gap-2">
             {media.status === 'error' && <button onClick={() => api.retryMedia(media.id).then(onChanged)} className="text-indigo-600 hover:underline">重試</button>}

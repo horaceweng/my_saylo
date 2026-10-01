@@ -301,6 +301,17 @@
 - 測試：後端新增 11 個（`test_batch_import.py`），全部通過（後端共 323 個）；額外用假資料驗證了分句＋幻聽過濾＋長音檔分段的重用邏輯、批次翻譯＋缺漏句子單獨重試的邏輯；`import_batch.py` 對著真實暫存資料庫跑過（匯入、重複略過、壞檔案回報錯誤、跨兩次執行結果一致）；用真實網路請求驗證了所有 160 筆素材的音訊／影片連結可以下載
 - 未驗證：Colab 上的語音辨識與翻譯本身完全沒有實際跑過（沒有 GPU），辨識準確度、qwen3:8b 翻譯品質、整個流程跑起來順不順仍需要使用者自己在 Colab 上執行第一批才能確認；YouTube 的反機器人措施可能隨時再變化
 
+
+**追加：影片、書籍、Podcast 都真的跑通了（2026-09-30）**
+- 使用者實測全程：分批處理（每日免費 GPU 額度用盡，隔天接續）、`web_safari` + cookies 解決了 YouTube 的反機器人問題、`import_batch.py` 匯入 125 部影片／Podcast，全部成功。
+
+**追加：影片與 Podcast 補上難度分級與篩選（2026-09-30）**
+- 動機：批次匯入大量教材後，影片和 Podcast 列表沒有難度標籤可以篩選，找不到適合自己程度的內容（書籍原本就有 A2/B1/B2/C1+ 篩選，這次補齊另外兩類）
+- 後端：`Media` 新增 `level`／`score` 欄位（沿用書籍同一套 `services/grading.py` 演算法，對象是逐字稿的句子文字）；轉錄完成時（`pipeline.py._run` 結尾）與 Colab 批次匯入時（`batch_import.py`）都會計算；`routers/media.py` 新增 `regrade_media(engine)`，比照書籍的 `regrade_all`，在啟動時對所有 `status=ready` 的影片／Podcast 重新分級一次（用獨立的 `media_grading_version` 設定鍵，跟書籍的分級版本互不干擾）；`media_out()` 直接透過 `model_dump()` 帶出新欄位，前端不用改 API 呼叫
+- 前端：`VideoList` 和「書籍 → Podcast」都加上跟書庫一樣的等級篩選按鈕（全部／A2／B1／B2／C1+，各自顯示數量），`MediaCard` 加上難度徽章；篩選邏輯直接重用書庫既有的 `lib/books.ts`（`LEVELS`／`countByLevel`／`filterByLevel`），因為 `Media.level` 跟 `Book.level`是同一個型別（`BookLevel | ''`），沒有另外寫一份
+- 測試：後端新增 4 個（`test_media_grading.py` 的 `regrade_media` 行為、`test_pipeline.py`／`test_batch_import.py` 各加一個分級斷言），共 326 個；前端沿用既有測試並修正 2 個因新增必填欄位而型別不符的假資料，共 111 個
+- 實測：重啟後端，125 部既有影片／Podcast 全部在啟動時自動分級（server log：「graded 125 saved videos/podcasts again」）；瀏覽器確認「影片」與「Podcast」分頁的篩選按鈕、數量、徽章都正確
+- 觀察：分級是估計值，套用到 Podcast/影片上跟原始策展等級（例如 NPR「Up First」原本設定為 C1+ 代表）不完全吻合，多數被評為 B1；這是既有分級演算法（書籍／文章沿用的門檻）本身的校準問題，不是這次功能的 bug，先如實記下，之後有需要再校準
 **修正：翻譯改在 Colab 本機跑 Ollama + qwen3:8b，不叫雲端 API（2026-09-28）**
 - 使用者要求：「既然是用 colab 的雲端，當然也要利用它來跑 ollama」——筆記本不再需要雲端 API 金鑰，改成安裝 Ollama、下載 qwen3:8b，直接重用主系統的 `app.services.llm.OllamaProvider` 與 `chat_json`，確保是原生 `/api/chat`、`think: false`（跟主系統最早踩過的坑一樣：OpenAI 相容介面會忽略 `think: false`，同一句從 2 秒變 47 秒，所以直接重用同一份程式碼而不是重寫）
 - Whisper 模型改成預設 `large-v3-turbo`（原本筆記本預設 `large-v3`）：跟主系統本機同一個模型，準確又比 `large-v3` 快、VRAM 用量小很多，讓免費 T4（16 GB）能同時載入 qwen3:8b（約 5 GB）+ `large-v3-turbo`（約 1.5 GB）

@@ -12,6 +12,7 @@ from app.db import engine
 from app.models import Media, Segment, Word
 from app.config import settings
 from app.services import podcast, prompts, youtube
+from app.services.grading import grade
 from app.services.llm import LLMError, chat_json, make_provider
 from app.services.chunked import transcribe_in_pieces
 from app.services.segmenter import Sentence, split_sentences
@@ -188,6 +189,14 @@ def _counts_now(media_id: int) -> tuple[int, int]:
         return _counts(session, media_id)
 
 
+def _grade(media_id: int) -> tuple[str, float]:
+    """Estimate the transcript's difficulty (A2/B1/B2/C1+), the same way as books (services/grading.py)."""
+    with Session(engine) as session:
+        texts = session.exec(select(Segment.text).where(Segment.media_id == media_id).order_by(Segment.idx)).all()
+    level, score, _ = grade(texts)
+    return level, score
+
+
 def _run(media_id: int) -> None:
     """download → transcribe in pieces → translate, skipping whatever an earlier run finished.
 
@@ -249,7 +258,8 @@ def _run(media_id: int) -> None:
     translated_now = _translate_pending(media_id, attempted, report=report)
     total, _ = _counts_now(media_id)
     timings["translate"] = time.monotonic() - t
-    _set(media_id, status="ready", progress=100)
+    level, score = _grade(media_id)
+    _set(media_id, status="ready", progress=100, level=level, score=score)
     _focus.pop(media_id, None)
     log.info(
         "media %s ready: %d sentences (%d translated after the first pieces) | %s | total %.0fs",
