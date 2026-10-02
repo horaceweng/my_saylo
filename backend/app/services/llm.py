@@ -1,4 +1,7 @@
+import asyncio
 import json
+import logging
+import time
 from collections.abc import AsyncIterator
 from typing import Protocol, TypeVar
 
@@ -6,6 +9,10 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.config import settings
+from app.services import usage
+from app.services.compute import Cooldown, heavy
+
+log = logging.getLogger("uvicorn.error")
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -39,6 +46,8 @@ class OllamaProvider:
             "stream": stream,
             "think": False,
             "options": {"temperature": 0.3},
+            # Do not keep the model (5.6 GB for qwen3:8b) in memory for the default five minutes.
+            "keep_alive": f"{settings.local_keep_alive_seconds}s",
         }
         if json_mode:
             payload["format"] = "json"
@@ -46,36 +55,63 @@ class OllamaProvider:
 
     async def chat(self, system: str, user: str, *, json_mode: bool = False) -> str:
         payload = self._payload(system, user, json_mode, stream=False)
-        try:
-            async with httpx.AsyncClient(timeout=180) as client:
-                resp = await client.post(f"{self.base_url}/api/chat", json=payload)
-                resp.raise_for_status()
-        except httpx.ConnectError as e:
-            raise LLMError("無法連線到 Ollama，請確認已執行 `ollama serve`") from e
-        except httpx.HTTPError as e:
-            raise LLMError(f"Ollama 請求失敗：{e}") from e
+        async with heavy.ahold("ollama"):  # only one heavy local model runs at a time; waiting does not count as the model's time
+            _loaded.add((self.base_url, self.model))
+            try:
+                async with asyncio.timeout(settings.llm_request_seconds):
+                    async with httpx.AsyncClient(timeout=settings.llm_request_seconds) as client:
+                        resp = await client.post(f"{self.base_url}/api/chat", json=payload)
+                        resp.raise_for_status()
+            except httpx.ConnectError as e:
+                raise LLMError("無法連線到 Ollama，請確認已執行 `ollama serve`") from e
+            except TimeoutError as e:
+                raise LLMError(f"本地模型超過 {settings.llm_request_seconds} 秒沒有回應") from e
+            except httpx.HTTPError as e:
+                raise LLMError(f"Ollama 請求失敗：{e}") from e
         return resp.json()["message"]["content"]
 
     async def stream(self, system: str, user: str, *, json_mode: bool = False) -> AsyncIterator[str]:
         """Yield the reply in pieces as the model produces it. Closing the iterator stops generation."""
         payload = self._payload(system, user, json_mode, stream=True)
+        async with heavy.ahold("ollama"):
+            _loaded.add((self.base_url, self.model))
+            deadline = time.monotonic() + settings.llm_request_seconds
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(settings.llm_request_seconds, connect=10)) as client:
+                    async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as resp:
+                        resp.raise_for_status()
+                        async for line in resp.aiter_lines():
+                            if time.monotonic() > deadline:
+                                raise LLMError(f"本地模型超過 {settings.llm_request_seconds} 秒還沒寫完")
+                            if not line.strip():
+                                continue
+                            event = json.loads(line)
+                            chunk = event.get("message", {}).get("content", "")
+                            if chunk:
+                                yield chunk
+                            if event.get("done"):
+                                return
+            except httpx.ConnectError as e:
+                raise LLMError("無法連線到 Ollama，請確認已執行 `ollama serve`") from e
+            except httpx.HTTPError as e:
+                raise LLMError(f"Ollama 請求失敗：{e}") from e
+
+
+# Ollama models this process has used since they were last unloaded: (base url, model).
+_loaded: set[tuple[str, str]] = set()
+
+
+def unload_ollama() -> None:
+    """Ask Ollama to drop the models we used from memory now (`keep_alive: 0`), before whisper or the voice needs the RAM."""
+    while _loaded:
+        base_url, model = _loaded.pop()
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=10)) as client:
-                async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line.strip():
-                            continue
-                        event = json.loads(line)
-                        chunk = event.get("message", {}).get("content", "")
-                        if chunk:
-                            yield chunk
-                        if event.get("done"):
-                            return
-        except httpx.ConnectError as e:
-            raise LLMError("無法連線到 Ollama，請確認已執行 `ollama serve`") from e
-        except httpx.HTTPError as e:
-            raise LLMError(f"Ollama 請求失敗：{e}") from e
+            httpx.post(f"{base_url}/api/generate", json={"model": model, "keep_alive": 0}, timeout=10)
+        except httpx.HTTPError:
+            log.debug("could not ask Ollama to unload %s", model)
+
+
+heavy.register_unloader("ollama", unload_ollama)
 
 
 def _http_message(response: httpx.Response) -> str:
@@ -126,10 +162,13 @@ class OpenAICompatProvider:
     async def chat(self, system: str, user: str, *, json_mode: bool = False) -> str:
         url = f"{self.base_url}/chat/completions"
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(url, json=self._payload(system, user, json_mode, False), headers=self._headers())
-                if resp.status_code == 400 and json_mode:
-                    resp = await client.post(url, json=self._payload(system, user, False, False), headers=self._headers())
+            async with asyncio.timeout(settings.llm_request_seconds):
+                async with httpx.AsyncClient(timeout=settings.llm_request_seconds) as client:
+                    resp = await client.post(url, json=self._payload(system, user, json_mode, False), headers=self._headers())
+                    if resp.status_code == 400 and json_mode:
+                        resp = await client.post(url, json=self._payload(system, user, False, False), headers=self._headers())
+        except TimeoutError as e:
+            raise LLMError(f"雲端服務超過 {settings.llm_request_seconds} 秒沒有回應") from e
         except httpx.HTTPError as e:
             raise LLMError(f"連不上雲端服務：{type(e).__name__}") from e
         if resp.status_code >= 400:
@@ -145,8 +184,9 @@ class OpenAICompatProvider:
     async def stream(self, system: str, user: str, *, json_mode: bool = False) -> AsyncIterator[str]:
         """Yield the reply in pieces as it is produced. Closing the iterator ends the request."""
         url = f"{self.base_url}/chat/completions"
+        deadline = time.monotonic() + settings.llm_request_seconds
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=10)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(settings.llm_request_seconds, connect=10)) as client:
                 for with_format in ((True, False) if json_mode else (False,)):
                     async with client.stream("POST", url, json=self._payload(system, user, with_format, True), headers=self._headers()) as resp:
                         if resp.status_code == 400 and with_format:
@@ -156,6 +196,8 @@ class OpenAICompatProvider:
                             await resp.aread()
                             raise LLMError(_http_message(resp))
                         async for line in resp.aiter_lines():
+                            if time.monotonic() > deadline:
+                                raise LLMError(f"雲端服務超過 {settings.llm_request_seconds} 秒還沒寫完")
                             line = line.strip()
                             if not line.startswith("data:"):
                                 continue
@@ -173,15 +215,84 @@ class OpenAICompatProvider:
             raise LLMError(f"連不上雲端服務：{type(e).__name__}") from e
 
 
+# After a cloud failure the cloud is skipped for a minute, so each request does not wait for the same timeout again.
+cloud_cooldown = Cooldown(60.0)
+
+
+class FallbackProvider:
+    """The cloud service first; when it fails (unreachable, timeout, 429, 5xx, answers that are not usable JSON)
+    the same request is answered by the local Ollama model instead. Every fallback is logged and counted
+    (`UsageEvent` fallback_llm) so the admin page can show how often it happens."""
+
+    def __init__(self, primary: LLMProvider, local_factory=None):
+        self.primary = primary
+        self._local_factory = local_factory or OllamaProvider
+        self.fell_back = False
+
+    def _fall_back(self, reason: object, cool_down: bool) -> LLMProvider:
+        self.fell_back = True
+        if cool_down:
+            cloud_cooldown.start()
+        log.warning("cloud LLM failed (%s); answering with the local model instead", reason)
+        usage.record_system(usage.FALLBACK_LLM)
+        return self._local_factory()
+
+    def json_fallback(self, error: Exception) -> LLMProvider | None:
+        """The local provider to try after the cloud's answers were not valid JSON twice (None: nothing left to try)."""
+        return None if self.fell_back else self._fall_back(error, cool_down=False)
+
+    async def chat(self, system: str, user: str, *, json_mode: bool = False) -> str:
+        if self.fell_back or cloud_cooldown.active():
+            local = self._local_factory() if self.fell_back else self._fall_back("cloud skipped after a recent failure", cool_down=False)
+            return await local.chat(system, user, json_mode=json_mode)
+        try:
+            return await self.primary.chat(system, user, json_mode=json_mode)
+        except LLMError as e:
+            local = self._fall_back(e, cool_down=True)
+        return await local.chat(system, user, json_mode=json_mode)
+
+    async def stream(self, system: str, user: str, *, json_mode: bool = False) -> AsyncIterator[str]:
+        if self.fell_back or cloud_cooldown.active():
+            local = self._local_factory() if self.fell_back else self._fall_back("cloud skipped after a recent failure", cool_down=False)
+            async for piece in local.stream(system, user, json_mode=json_mode):
+                yield piece
+            return
+        started = False
+        try:
+            async for piece in self.primary.stream(system, user, json_mode=json_mode):
+                started = True
+                yield piece
+            return
+        except LLMError as e:
+            if started:
+                raise  # the reader already has part of the answer: starting over would repeat it
+            local = self._fall_back(e, cool_down=True)
+        async for piece in local.stream(system, user, json_mode=json_mode):
+            yield piece
+
+
 def make_provider():
-    """The AI service chosen on the settings page."""
+    """The AI service chosen on the settings page (the cloud one falls back to local Ollama unless switched off)."""
     if settings.llm_backend == "cloud":
-        return OpenAICompatProvider()
+        cloud = OpenAICompatProvider()
+        return FallbackProvider(cloud) if settings.fallback_local else cloud
     return OllamaProvider()
 
 
 async def chat_json(provider: LLMProvider, system: str, user: str, schema: type[T]) -> T:
-    """Ask for JSON, validate against `schema`, retry once on bad output."""
+    """Ask for JSON, validate against `schema`, retry once on bad output; a cloud provider that still fails
+    hands the question to the local model."""
+    try:
+        return await _ask_json(provider, system, user, schema)
+    except LLMError as e:
+        fallback = getattr(provider, "json_fallback", None)
+        local = fallback(e) if fallback else None
+        if local is None:
+            raise
+        return await _ask_json(local, system, user, schema)
+
+
+async def _ask_json(provider: LLMProvider, system: str, user: str, schema: type[T]) -> T:
     last_err: Exception | None = None
     for _ in range(2):
         raw = await provider.chat(system, user, json_mode=True)

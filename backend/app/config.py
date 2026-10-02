@@ -27,6 +27,29 @@ class Settings(BaseSettings):
     stt_base_url: str = ""
     stt_api_key: str = ""
     stt_model: str = ""
+    # When the cloud service fails (unreachable, timeout, 429, 5xx, unusable answers), do the work on this Mac instead.
+    fallback_local: bool = True
+
+    # This Mac has 16 GB: only one heavy local model may be in memory at a time (see services/compute.py).
+    # Ollama frees its model this many seconds after the last request; local whisper is dropped after the same idle time.
+    local_keep_alive_seconds: int = 60
+
+    # Limits. A request to the LLM, and a media job as a whole (audio length x factor + extra seconds).
+    llm_request_seconds: int = 120
+    media_time_factor: float = 3.0
+    media_time_extra_seconds: int = 600
+
+    # Daily quotas per user (admins are exempt). A day ends at midnight in `quota_timezone`.
+    quota_timezone: str = "Asia/Taipei"
+    quota_media_per_day: int = 5
+    quota_audio_minutes_per_day: int = 90
+    quota_ai_requests_per_day: int = 300
+    max_upload_mb: int = 100
+    max_media_minutes: int = 90
+
+    # In-memory rate limits (per minute): logins/sign-ups per IP, other API calls per user.
+    rate_limit_auth_per_minute: int = 10
+    rate_limit_api_per_minute: int = 120
 
     @property
     def active_llm_model(self) -> str:

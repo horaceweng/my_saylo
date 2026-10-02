@@ -22,6 +22,7 @@ class SettingsUpdate(BaseModel):
     stt_base_url: str | None = Field(default=None, max_length=300)
     stt_api_key: str | None = Field(default=None, max_length=300)
     stt_model: str | None = Field(default=None, max_length=120)
+    fallback_local: bool | None = None
 
 
 @router.get("")
@@ -33,7 +34,7 @@ def get_settings():
 def put_settings(body: SettingsUpdate):
     try:
         cloud = {f: getattr(body, f) for f in app_settings.CLOUD_FIELDS}
-        app_settings.update(engine, body.llm_model, body.whisper_model, cloud)
+        app_settings.update(engine, body.llm_model, body.whisper_model, cloud, body.fallback_local)
     except SettingError as e:
         raise HTTPException(400, str(e)) from e
     return app_settings.snapshot()

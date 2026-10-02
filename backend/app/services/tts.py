@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.config import settings
+from app.services.compute import heavy
 
 log = logging.getLogger("uvicorn.error")
 
@@ -129,8 +130,9 @@ def synthesize(text: str, voice: Voice):
     """The spoken text as float samples (24 kHz, mono)."""
     import numpy as np
 
-    model = _load_model()
-    parts = [np.array(r.audio) for r in model.generate(text=text, voice=voice.id, speed=1.0, lang_code=voice.lang_code)]
+    with heavy.hold("tts"):  # takes its turn with whisper and Ollama; they are unloaded first (see services/compute.py)
+        model = _load_model()
+        parts = [np.array(r.audio) for r in model.generate(text=text, voice=voice.id, speed=1.0, lang_code=voice.lang_code)]
     if not parts:
         raise TTSError("這段文字念不出來")
     return np.concatenate(parts)

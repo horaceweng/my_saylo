@@ -119,6 +119,9 @@ def test_the_chosen_backend_decides_the_provider_and_the_cache_key(monkeypatch):
     local_key = ai_cache.cache_key("word", "hello")
     monkeypatch.setattr(settings, "llm_backend", "cloud")
     monkeypatch.setattr(settings, "cloud_model", "gemini-x")
+    provider = llm.make_provider()
+    assert isinstance(provider, llm.FallbackProvider) and isinstance(provider.primary, OpenAICompatProvider)  # cloud first, local as the net
+    monkeypatch.setattr(settings, "fallback_local", False)
     assert isinstance(llm.make_provider(), OpenAICompatProvider)
     assert ai_cache.cache_key("word", "hello") != local_key  # another model never reuses the other's answers
 

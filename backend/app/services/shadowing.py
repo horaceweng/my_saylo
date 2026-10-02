@@ -15,9 +15,8 @@ from pathlib import Path
 
 import numpy as np
 
-from app.config import settings
 from app.services.segmenter import Word
-from app.services.transcribe import whisper_lock
+from app.services import compute, transcribe
 
 UNCLEAR_BELOW = 0.5  # recognition confidence under which a matched word counts as unclear
 
@@ -122,17 +121,11 @@ def wav_stats(path: Path) -> tuple[float, float]:
 def transcribe_recording(wav: Path) -> list[Word]:
     """Recognise a short recording. Doubtful words are kept (that is the signal we want); only text
     the recogniser itself flags as 'no speech here' is dropped."""
-    import mlx_whisper  # heavy import, keep lazy
-
-    if not whisper_lock.acquire(timeout=LOCK_WAIT_SECONDS):
-        raise TranscriberBusy("語音辨識正在處理影片，請稍後再試")
+    # Always the local model (the confidence of each word is what marks unclear words, and the cloud gives none).
     try:
-        result = mlx_whisper.transcribe(
-            str(wav), path_or_hf_repo=settings.whisper_model, word_timestamps=True, language="en",
-            condition_on_previous_text=False,
-        )
-    finally:
-        whisper_lock.release()
+        result = transcribe.run_whisper(str(wav), timeout=LOCK_WAIT_SECONDS, condition_on_previous_text=False)
+    except compute.Busy as e:
+        raise TranscriberBusy("語音辨識正在處理影片，請稍後再試") from e
     words: list[Word] = []
     for seg in result["segments"]:
         if seg.get("no_speech_prob", 0) > 0.6 and seg.get("avg_logprob", 0) < -0.5:

@@ -168,3 +168,14 @@ class AuthSession(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_now)
     expires_at: datetime
     last_seen: datetime = Field(default_factory=_now)
+
+
+class UsageEvent(SQLModel, table=True):
+    """One thing counted against a daily quota (`media`, `audio_minutes`, `ai`), or a note that the cloud failed and
+    this Mac did the work instead (`fallback_llm`, `fallback_stt`, no user)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
+    kind: str = Field(index=True)
+    amount: float = 1.0
+    created_at: datetime = Field(default_factory=_now, index=True)

@@ -3,11 +3,12 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine, select
 from sqlmodel.pool import StaticPool
 
+from app import db
 from app.config import settings
 from app.db import get_session
 from app.main import app
 from app.models import User
-from app.services import auth
+from app.services import auth, compute, llm, ratelimit, transcribe
 
 
 class FakeLLM:
@@ -22,6 +23,19 @@ class FakeLLM:
             if marker in system:
                 return reply
         raise AssertionError(f"no canned reply for: {system[:40]}")
+
+
+@pytest.fixture(autouse=True)
+def isolated_state(monkeypatch):
+    """Nothing a test does may reach the real database (fallback events are written through `db.engine`),
+    and the in-memory counters start from zero."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(db, "engine", engine)
+    ratelimit.reset()
+    llm.cloud_cooldown.reset()
+    transcribe.cloud_cooldown.reset()
+    compute.heavy._last_kind = None
 
 
 @pytest.fixture
