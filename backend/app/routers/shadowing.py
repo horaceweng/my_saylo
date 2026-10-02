@@ -12,7 +12,7 @@ from app.config import settings
 from app.db import get_session
 from app.deps import current_user
 from app.models import Media, Recording, Segment, User
-from app.services import prompts, shadowing
+from app.services import prompts, shadowing, usage
 from app.services.llm import LLMError, chat_json, make_provider
 from app.services.partial_json import parse_partial
 
@@ -89,6 +89,7 @@ async def upload_recording(segment_id: int, file: UploadFile, session: Session =
             raise HTTPException(413, f"錄音太長（超過 {MAX_SECONDS} 秒），請只錄這一句")
         if loudness < shadowing.SILENT_RMS:
             raise HTTPException(422, "沒有錄到聲音，請確認麥克風有開啟、音量足夠")
+        usage.charge_ai(session, user)  # speech recognition on this Mac is the costly part
         try:
             words = await asyncio.to_thread(shadowing.transcribe_recording, wav)
         except shadowing.TranscriberBusy as e:
@@ -150,6 +151,8 @@ async def feedback_stream(
     seg = _segment(session, rec.segment_id)
     bind, saved = session.get_bind(), rec.feedback_json
     reference, heard, score = seg.text, rec.heard_text, rec.score
+    if not saved:
+        usage.charge_ai(session, user)
     facts = shadowing.Comparison(
         [shadowing.Token(**t) for t in json.loads(rec.diff_json)], score, {}
     ).facts()

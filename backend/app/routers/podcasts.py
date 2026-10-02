@@ -12,7 +12,7 @@ from app.db import get_session
 from app.deps import admin_user, current_user
 from app.models import Feed, Media, User
 from app.routers.media import media_out, media_stats
-from app.services import pipeline, podcast
+from app.services import pipeline, podcast, usage
 from app.services.podcast import PodcastError
 
 router = APIRouter(prefix="/api/podcasts", tags=["podcasts"])
@@ -107,6 +107,7 @@ def add_podcast(body: CreatePodcast, session: Session = Depends(get_session), us
     existing = session.exec(select(Media).where(Media.kind == "podcast", Media.source_url == url)).first()
     if existing:
         return media_out(existing, media_stats(session, [existing.id]).get(existing.id))
+    usage.charge_media(session, user, body.duration)
     fallback_title = Path(url.split("?")[0]).stem.replace("_", " ").replace("-", " ") or "Podcast"
     media = Media(
         kind="podcast", source_url=url, external_id=hashlib.sha1(url.encode()).hexdigest()[:11],
@@ -129,16 +130,17 @@ async def upload_podcast(file: UploadFile, title: str = Form(""), session: Sessi
     folder = settings.data_dir / "audio"
     folder.mkdir(parents=True, exist_ok=True)
     target = folder / f"upload_{uuid.uuid4().hex[:16]}{ext}"
-    written = 0
+    written, limit = 0, usage.upload_limit_bytes(user, MAX_UPLOAD_BYTES)
     try:
         with target.open("wb") as out:
             while chunk := await file.read(1 << 20):
                 written += len(chunk)
-                if written > MAX_UPLOAD_BYTES:
-                    raise HTTPException(413, "音檔太大（超過 600 MB）")
+                if written > limit:
+                    raise HTTPException(413, f"音檔太大（超過 {limit // (1024 * 1024)} MB）")
                 out.write(chunk)
         if written == 0:
             raise HTTPException(400, "檔案是空的")
+        usage.charge_media(session, user)  # its length is counted once the audio has been read (pipeline)
     except BaseException:
         target.unlink(missing_ok=True)
         raise

@@ -6,7 +6,7 @@ from app.config import settings
 from app.db import get_session
 from app.deps import current_user
 from app.models import User
-from app.services import auth
+from app.services import auth, ratelimit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -31,7 +31,7 @@ def _set_cookie(response: Response, token: str) -> None:
     )
 
 
-@router.post("/login")
+@router.post("/login", dependencies=[Depends(ratelimit.limit_auth)])
 def login(body: LoginIn, response: Response, session: Session = Depends(get_session)):
     try:
         user = auth.authenticate(session, body.username, body.password)
@@ -41,7 +41,7 @@ def login(body: LoginIn, response: Response, session: Session = Depends(get_sess
     return user_out(user)
 
 
-@router.post("/register")
+@router.post("/register", dependencies=[Depends(ratelimit.limit_auth)])
 def register(body: RegisterIn, response: Response, session: Session = Depends(get_session)):
     try:
         user = auth.register(session, body.code, body.username, body.password)

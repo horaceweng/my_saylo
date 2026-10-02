@@ -3,7 +3,7 @@ from sqlmodel import Session
 
 from app.db import get_session
 from app.models import User
-from app.services import auth
+from app.services import auth, ratelimit
 
 
 def optional_user(request: Request, session: Session = Depends(get_session)) -> User | None:
@@ -13,6 +13,7 @@ def optional_user(request: Request, session: Session = Depends(get_session)) -> 
 def current_user(user: User | None = Depends(optional_user)) -> User:
     if not user:
         raise HTTPException(401, "請先登入")
+    ratelimit.limit_user(user.id)
     return user
 
 

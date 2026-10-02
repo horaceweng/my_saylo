@@ -13,7 +13,7 @@ from app.config import settings
 from app.db import get_session
 from app.deps import admin_user, current_user
 from app.models import Book, Chapter, Paragraph, Setting, User
-from app.services import books, gutenberg, grading, prompts
+from app.services import books, gutenberg, grading, prompts, usage
 from app.services.books import BookError, ParsedBook
 from app.services.gutenberg import GutenbergError
 from app.services.llm import LLMError, make_provider
@@ -228,13 +228,17 @@ def delete_book(book_id: int, session: Session = Depends(get_session), _: User =
 
 
 @router.post("/paragraphs/{paragraph_id}/translate/stream")
-async def translate_paragraph(paragraph_id: int, session: Session = Depends(get_session), provider=Depends(get_translation_provider)):
+async def translate_paragraph(
+    paragraph_id: int, session: Session = Depends(get_session), provider=Depends(get_translation_provider), user: User = Depends(current_user)
+):
     """Translate one paragraph, streamed as newline-delimited JSON ({"type":"partial","text":…} … "done").
     The result is kept, so each paragraph is only ever translated once."""
     row = session.get(Paragraph, paragraph_id)
     if not row:
         raise HTTPException(404, "找不到這個段落")
     bind, text, saved = session.get_bind(), row.text, row.translation
+    if not saved:
+        usage.charge_ai(session, user)
 
     def line(event: dict) -> str:
         return json.dumps(event, ensure_ascii=False) + "\n"

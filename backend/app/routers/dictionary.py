@@ -8,8 +8,9 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.db import get_session
-from app.models import AiCache
-from app.services import ai_cache, dictionary, prompts
+from app.deps import current_user
+from app.models import AiCache, User
+from app.services import ai_cache, dictionary, prompts, usage
 from app.services.llm import LLMError, chat_json, make_provider
 from app.services.partial_json import parse_partial
 
@@ -40,7 +41,7 @@ _WORD_RE = re.compile(r"^[a-zA-Z][a-zA-Z'-]{0,40}$")
 
 
 @router.get("/root/{root}")
-async def words_with_root(root: str, meaning: str = "", session: Session = Depends(get_session)):
+async def words_with_root(root: str, meaning: str = "", session: Session = Depends(get_session), user: User = Depends(current_user)):
     """Words sharing a root. The LLM proposes them, ECDICT filters out invented ones."""
     root = root.strip().lower()
     if not _WORD_RE.match(root):
@@ -50,11 +51,13 @@ async def words_with_root(root: str, meaning: str = "", session: Session = Depen
         root += "e"
     stem = root[:-1] if root.endswith("e") and len(root) > 3 else root
     provider = make_provider()
+
+    async def ask():
+        usage.charge_ai(session, user)
+        return await chat_json(provider, prompts.ROOT_SYSTEM, f"字根：{root}" + (f"（{meaning}）" if meaning else ""), prompts.RootWords)
+
     try:
-        proposed = await ai_cache.cached(
-            session, "root", f"{root}|{meaning}", prompts.RootWords,
-            lambda: chat_json(provider, prompts.ROOT_SYSTEM, f"字根：{root}" + (f"（{meaning}）" if meaning else ""), prompts.RootWords),
-        )
+        proposed = await ai_cache.cached(session, "root", f"{root}|{meaning}", prompts.RootWords, ask)
     except LLMError as e:
         raise HTTPException(503, str(e)) from e
     words = []
@@ -102,7 +105,7 @@ async def get_word(word: str, session: Session = Depends(get_session)):
 
 
 @router.post("/{word}/enrich/stream")
-async def enrich_word(word: str, session: Session = Depends(get_session), provider=Depends(get_word_provider)):
+async def enrich_word(word: str, session: Session = Depends(get_session), provider=Depends(get_word_provider), user: User = Depends(current_user)):
     """The AI's extra explanation of a word (English meaning, examples, prefix/root/suffix, synonyms), streamed
     as newline-delimited JSON: {"type":"partial","data":{…}} … then "done" or "error". Kept for next time."""
     word = word.strip().lower()
@@ -113,6 +116,8 @@ async def enrich_word(word: str, session: Session = Depends(get_session), provid
     key, bind = ai_cache.cache_key("word", target), session.get_bind()
     cached = session.get(AiCache, key)
     saved = json.loads(cached.payload_json) if cached else None
+    if saved is None:
+        usage.charge_ai(session, user)
 
     def line(event: dict) -> str:
         return json.dumps(event, ensure_ascii=False) + "\n"

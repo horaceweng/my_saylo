@@ -5,7 +5,7 @@ from sqlmodel import Session, col, select
 from app.db import get_session
 from app.deps import admin_user
 from app.models import Invite, User
-from app.services import auth
+from app.services import auth, usage
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(admin_user)])
 
@@ -40,10 +40,28 @@ def list_invites(session: Session = Depends(get_session)):
 
 @router.get("/users")
 def list_users(session: Session = Depends(get_session)):
+    today = usage.today_summary(session)
     return [
-        {"id": u.id, "username": u.username, "is_admin": u.is_admin, "disabled": u.disabled, "created_at": u.created_at.isoformat()}
+        {
+            "id": u.id, "username": u.username, "is_admin": u.is_admin, "disabled": u.disabled, "created_at": u.created_at.isoformat(),
+            "usage_today": {
+                "media": today.get(u.id, {}).get(usage.MEDIA, 0), "audio_minutes": round(today.get(u.id, {}).get(usage.AUDIO_MINUTES, 0), 1),
+                "ai": today.get(u.id, {}).get(usage.AI, 0),
+            },
+        }
         for u in session.exec(select(User).order_by(User.id)).all()
     ]
+
+
+@router.get("/usage")
+def usage_overview(session: Session = Depends(get_session)):
+    """The daily limits, and how often the cloud service failed and this Mac did the work instead."""
+    limits, fallbacks = usage.limits(), usage.fallback_counts(session)
+    return {
+        "limits": {"media": limits[usage.MEDIA], "audio_minutes": limits[usage.AUDIO_MINUTES], "ai": limits[usage.AI]},
+        "fallbacks": {"llm": fallbacks[usage.FALLBACK_LLM], "stt": fallbacks[usage.FALLBACK_STT]},
+        "resets_at": usage.next_reset().isoformat(),
+    }
 
 
 def _set_disabled(user_id: int, disabled: bool, admin: User, session: Session) -> dict:
