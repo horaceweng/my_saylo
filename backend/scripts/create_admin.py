@@ -31,8 +31,8 @@ def main() -> int:
         except auth.AuthError as e:
             print(e)
             return 1
-        moved = auth.claim_ownerless_rows(session, user.id)
-    print(f"已建立管理員 {user.username}" + (f"，並把 {moved} 筆舊的片語／錄音歸給他" if moved else ""))
+        name, moved = user.username, auth.claim_ownerless_rows(session, user.id)
+    print(f"已建立管理員 {name}" + (f"，並把 {moved} 筆舊的片語／錄音歸給他" if moved else ""))
     return 0
 
 
