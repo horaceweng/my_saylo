@@ -9,7 +9,7 @@ from sqlmodel import Session, delete, func, select
 from app.db import get_session
 from app.deps import admin_user, current_user
 from app.models import Media, Segment, Setting, User, Word
-from app.services import pipeline, youtube
+from app.services import pipeline, usage, youtube
 from app.services.grading import GRADING_VERSION, grade
 
 router = APIRouter(prefix="/api/media", tags=["media"])
@@ -59,7 +59,9 @@ def media_out(media: Media, stats: dict | None = None) -> dict:
     """The media row plus what has been made so far. `playable`: enough is ready to start studying."""
     st = {"sentence_count": 0, "translated_count": 0, "covered_until": 0.0, **(stats or {})}
     playable = media.status == "ready" or st["translated_count"] >= pipeline.PLAYABLE_AFTER
-    return {**media.model_dump(), **st, "playable": playable}
+    # "Waiting, N jobs ahead": only meaningful until the worker picks it up.
+    position = pipeline.queue_position(media.id) if media.status == "pending" else 0
+    return {**media.model_dump(), **st, "playable": playable, "queue_position": position}
 
 
 def _segments(session: Session, media_id: int, from_idx: int = 0) -> list[dict]:
@@ -90,6 +92,7 @@ async def create_media(body: CreateMedia, session: Session = Depends(get_session
         info = await youtube.fetch_info_async(video_id)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"無法取得影片資訊：{str(e)[:200]}") from e
+    usage.charge_media(session, user, info.get("duration", 0))
     media = Media(kind="video", source_url=body.url, external_id=video_id, added_by=user.id, **info)
     session.add(media)
     session.commit()

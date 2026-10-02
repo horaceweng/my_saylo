@@ -197,3 +197,66 @@ def test_cooldown():
     assert c.active()
     time.sleep(0.06)
     assert not c.active()
+
+
+async def test_the_real_call_sites_take_turns(monkeypatch):
+    """Local whisper, an Ollama request and the local voice never run at the same time."""
+    import sys
+    import types
+
+    import httpx
+    import numpy as np
+
+    from app.services import llm, transcribe, tts
+
+    meter = Meter()
+
+    def busy(result):
+        meter.enter()
+        time.sleep(0.05)
+        meter.leave()
+        return result
+
+    fake_mlx = types.ModuleType("mlx_whisper")
+    fake_mlx.transcribe = lambda audio, **kw: busy({"segments": []})
+    monkeypatch.setitem(sys.modules, "mlx_whisper", fake_mlx)
+    monkeypatch.setattr(transcribe, "_schedule_idle_release", lambda: None)
+
+    class FakeVoice:
+        def generate(self, **kw):
+            busy(None)
+            return [types.SimpleNamespace(audio=np.zeros(10))]
+
+    monkeypatch.setattr(tts, "_load_model", lambda: FakeVoice())
+
+    real = httpx.AsyncClient
+
+    def handler(request):
+        busy(None)  # the model "thinks" while holding the lock (this handler runs on the event loop, like a slow reply)
+        return httpx.Response(200, json={"message": {"content": "hi"}})
+
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(llm.httpx, "post", lambda *a, **k: None)
+    voice = tts.VOICES[0]
+    await asyncio.gather(
+        asyncio.to_thread(transcribe.run_whisper, "a.wav"),
+        asyncio.to_thread(transcribe.run_whisper, np.zeros(10)),
+        asyncio.to_thread(tts.synthesize, "Hello", voice),
+        llm.OllamaProvider(model="m").chat("s", "u"),
+        llm.OllamaProvider(model="m").chat("s", "u"),
+    )
+    assert meter.peak == 1
+
+
+async def test_a_cloud_call_does_not_wait_for_the_lock(monkeypatch):
+    import httpx
+
+    from app.config import settings
+    from app.services import llm
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(settings, "cloud_base_url", "https://c.example/v1")
+    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(
+        lambda r: httpx.Response(200, json={"choices": [{"message": {"content": "cloud"}}]})), **kw))
+    async with compute.heavy.ahold("whisper"):  # a local job is running
+        assert await asyncio.wait_for(llm.OpenAICompatProvider(model="m").chat("s", "u"), 1) == "cloud"

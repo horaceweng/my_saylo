@@ -18,7 +18,7 @@ from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
 from app.models import AiCache
-from app.services import prompts
+from app.services import compute, prompts
 from app.services.ai_cache import cache_key
 from app.services.llm import LLMError, chat_json, make_provider
 from app.services.partial_json import parse_partial
@@ -36,6 +36,7 @@ class Job:
     finished: bool = False
     listeners: list[asyncio.Queue] = field(default_factory=list)
     task: asyncio.Task | None = None
+    position: int = 0  # jobs ahead of this one, as last announced
 
 
 class ExplainService:
@@ -63,7 +64,8 @@ class ExplainService:
     # ---- public API ----------------------------------------------------------------------
 
     async def subscribe(self, sentence: str, context: str = "") -> AsyncIterator[Event]:
-        """Events for one request: zero or more {"type":"partial"}, then a "done" or "error"."""
+        """Events for one request: {"type":"queued","position":N} while it waits for its turn (N jobs are ahead of it),
+        zero or more {"type":"partial"}, then a "done" or "error"."""
         hit = self.cached(sentence)
         if hit:
             yield {"type": "done", "data": hit.model_dump()}
@@ -71,6 +73,8 @@ class ExplainService:
         job = self.jobs.get(sentence) or self._enqueue(sentence, context)
         inbox: asyncio.Queue[Event] = asyncio.Queue()
         job.listeners.append(inbox)
+        if job.position > 0:
+            inbox.put_nowait({"type": "queued", "position": job.position})
         snapshot = parse_partial(job.text) if job.text else None
         if snapshot:  # joined a job that is already under way: catch up with what has been written
             inbox.put_nowait({"type": "partial", "data": snapshot})
@@ -78,7 +82,7 @@ class ExplainService:
             while True:
                 event = await inbox.get()
                 yield event
-                if event["type"] != "partial":
+                if event["type"] not in ("partial", "queued"):
                     return
         finally:
             job.listeners.remove(inbox)
@@ -91,6 +95,7 @@ class ExplainService:
         job = Job(sentence, context)
         self.jobs[sentence] = job
         self.queue.append(job)
+        self._announce()
         if self._drain is None or self._drain.done():
             self._drain = asyncio.create_task(self._drain_loop())
         return job
@@ -101,6 +106,7 @@ class ExplainService:
             self.queue.remove(job)
             self.jobs.pop(job.sentence, None)
             job.finished = True
+            self._announce()
         elif job.task:
             job.task.cancel()
 
@@ -108,6 +114,8 @@ class ExplainService:
         while self.queue:
             job = self.queue.pop(0)
             self.current = job
+            job.position = 0
+            self._announce()
             job.task = asyncio.create_task(self._generate(job))
             try:
                 await job.task
@@ -116,6 +124,14 @@ class ExplainService:
                     raise  # the loop itself is being shut down
             finally:
                 self.current = None
+
+    def _announce(self) -> None:
+        """Tell each waiting request how many jobs are ahead of it (the running one counts)."""
+        ahead = 1 if self.current else 0
+        for i, job in enumerate(self.queue):
+            if job.position != i + ahead:
+                job.position = i + ahead
+                self._emit(job, {"type": "queued", "position": job.position})
 
     def _emit(self, job: Job, event: Event) -> None:
         for inbox in job.listeners:
@@ -129,6 +145,8 @@ class ExplainService:
     async def _generate(self, job: Job) -> None:
         provider = self.provider_factory()
         user = prompts.explain_user_prompt(job.sentence, job.context)
+        # Waiting for the local model (whisper or another request is using it) is shown like waiting in line.
+        compute.on_wait.set(lambda position: self._emit(job, {"type": "queued", "position": position}))
         try:
             last = 0.0
             async for chunk in provider.stream(prompts.EXPLAIN_SYSTEM, user, json_mode=True):

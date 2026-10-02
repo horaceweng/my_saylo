@@ -9,9 +9,9 @@ import time
 from sqlmodel import Session, delete, func, select
 
 from app.db import engine
-from app.models import Media, Segment, Word
+from app.models import Media, Segment, User, Word
 from app.config import settings
-from app.services import podcast, prompts, youtube
+from app.services import podcast, prompts, usage, youtube
 from app.services.grading import grade
 from app.services.llm import LLMError, chat_json, make_provider
 from app.services.chunked import transcribe_in_pieces
@@ -29,13 +29,36 @@ UNFINISHED = ("pending", "downloading", "transcribing", "translating")
 # thread, so stopping the server never waits for a job to finish (a stale process used to linger for
 # an hour and keep working on the same video). Interrupted jobs pick up where they stopped, see _run.
 _work: "queue.Queue[int]" = queue.Queue()
-_queued: set[int] = set()
+_queued: set[int] = set()  # waiting or running
+_waiting: list[int] = []  # waiting, in the order the worker will take them
+_running: int | None = None
 _state = threading.Lock()
 _worker: threading.Thread | None = None
 
 
+def queue_position(media_id: int) -> int:
+    """How many jobs are ahead of this one (the running one counts); 0 when it is running or not queued."""
+    with _state:
+        if media_id not in _waiting:
+            return 0
+        return _waiting.index(media_id) + (1 if _running is not None else 0)
+
+
 class MediaDeleted(Exception):
     """The learner deleted the video while it was being processed: stop quietly."""
+
+
+class MediaTimeout(Exception):
+    """A job used more than its allowance (audio length x 3 + 10 minutes): it is marked failed and can be retried."""
+
+
+def time_budget(duration: float) -> float:
+    return duration * settings.media_time_factor + settings.media_time_extra_seconds
+
+
+def _check_time(deadline: float | None) -> None:
+    if deadline is not None and time.monotonic() > deadline:
+        raise MediaTimeout("處理時間太長，已先停止（已完成的部分都保留了）。按「繼續處理」可以從中斷的地方接著做")
 
 
 def _set(media_id: int, **fields) -> None:
@@ -92,6 +115,7 @@ def enqueue(media_id: int) -> None:
         if media_id in _queued:
             return
         _queued.add(media_id)
+        _waiting.append(media_id)
         _work.put(media_id)
         if _worker is None or not _worker.is_alive():
             _worker = threading.Thread(target=_worker_loop, name="media-worker", daemon=True)
@@ -99,12 +123,18 @@ def enqueue(media_id: int) -> None:
 
 
 def _worker_loop() -> None:
+    global _running
     while True:
         media_id = _work.get()
+        with _state:
+            if media_id in _waiting:
+                _waiting.remove(media_id)
+            _running = media_id
         try:
             process_media(media_id)
         finally:
             with _state:
+                _running = None
                 _queued.discard(media_id)
 
 
@@ -145,13 +175,14 @@ def _save_sentences(media_id: int, sentences: list[Sentence], first_idx: int) ->
         session.commit()
 
 
-def _translate_pending(media_id: int, attempted: set[int], window: int | None = None, report=None) -> int:
+def _translate_pending(media_id: int, attempted: set[int], window: int | None = None, report=None, deadline: float | None = None) -> int:
     """Translate untranslated sentences one batch at a time, the ones nearest the learner first.
     `window`: only the sentences from the learner's position up to that many after it (None: all of them,
     continuing from the start once the end is reached). A sentence that comes back empty is not retried in
     the same run. Returns how many were translated."""
     done = 0
     while True:
+        _check_time(deadline)
         focus = _focus.get(media_id, 0)
         with Session(engine) as session:
             rows = [
@@ -197,6 +228,20 @@ def _grade(media_id: int) -> tuple[str, float]:
     return level, score
 
 
+def _account_length(media_id: int, seconds: float, first_time: bool) -> None:
+    """The length of an episode whose feed did not say how long it is, known now: refuse one over the limit for an
+    ordinary user and count its minutes against their day (a video's length was counted when it was added)."""
+    with Session(engine) as session:
+        media = session.get(Media, media_id)
+        owner = session.get(User, media.added_by) if media and media.added_by else None
+        if owner is None or owner.is_admin:
+            return
+        if seconds > settings.max_media_minutes * 60:
+            raise RuntimeError(f"這個音檔太長（{seconds / 60:.0f} 分鐘），單支最長 {settings.max_media_minutes} 分鐘")
+        if first_time and seconds:
+            usage.record(session, owner.id, usage.AUDIO_MINUTES, seconds / 60)
+
+
 def _run(media_id: int) -> None:
     """download → transcribe in pieces → translate, skipping whatever an earlier run finished.
 
@@ -210,6 +255,7 @@ def _run(media_id: int) -> None:
     timings: dict[str, float] = {}
     started = time.monotonic()
     attempted: set[int] = set()
+    deadline: float | None = started + time_budget(known_duration) if known_duration else None
 
     if not transcribed:
         if not audio_path:
@@ -230,6 +276,8 @@ def _run(media_id: int) -> None:
         duration = len(audio) / SAMPLE_RATE
         if abs(duration - known_duration) > 1:
             _set(media_id, duration=round(duration, 1))  # feeds often lack a duration or round it
+        _account_length(media_id, duration, first_time=known_duration == 0)
+        deadline = started + time_budget(duration)
         with Session(engine) as session:
             saved_until = session.exec(select(func.max(Segment.end)).where(Segment.media_id == media_id)).one() or 0.0
             saved = session.exec(select(func.count()).select_from(Segment).where(Segment.media_id == media_id)).one()
@@ -239,7 +287,8 @@ def _run(media_id: int) -> None:
             _save_sentences(media_id, piece.sentences, first_idx=saved)
             saved += len(piece.sentences)
             doubtful += piece.doubtful
-            _translate_pending(media_id, attempted, window=LOOKAHEAD)  # the first ones open the video early
+            _translate_pending(media_id, attempted, window=LOOKAHEAD, deadline=deadline)  # the first ones open the video early
+            _check_time(deadline)
         if saved == 0:
             # Nothing looked reliable anywhere (poor audio, heavy accent): show it rather than erase it.
             fallback = split_sentences(doubtful)
@@ -255,7 +304,7 @@ def _run(media_id: int) -> None:
     def report(total: int, translated: int) -> None:
         _set(media_id, progress=50 + int(50 * translated / max(1, total)))
 
-    translated_now = _translate_pending(media_id, attempted, report=report)
+    translated_now = _translate_pending(media_id, attempted, report=report, deadline=deadline)
     total, _ = _counts_now(media_id)
     timings["translate"] = time.monotonic() - t
     level, score = _grade(media_id)

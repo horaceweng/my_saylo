@@ -168,3 +168,49 @@ async def test_generation_continues_while_at_least_one_listener_remains(service)
 async def test_no_background_work_without_a_request(service):
     await asyncio.sleep(0.05)
     assert FakeProvider.log == [] and service.jobs == {} and service.current is None
+
+
+async def test_a_request_waiting_behind_another_is_told_its_place_in_line(service):
+    FakeProvider.gates["A"] = asyncio.Event()
+    first = asyncio.create_task(collect(service.subscribe("A")))
+    await asyncio.sleep(0.05)
+    second = asyncio.create_task(collect(service.subscribe("B")))
+    third = asyncio.create_task(collect(service.subscribe("C")))
+    await asyncio.sleep(0.05)
+    FakeProvider.gates["A"].set()
+    r1, r2, r3 = await asyncio.gather(first, second, third)
+    assert [e for e in r1 if e["type"] == "queued"] == []  # the one running was never waiting
+    assert [e for e in r2 if e["type"] == "queued"][0] == {"type": "queued", "position": 1}
+    assert [e["position"] for e in r3 if e["type"] == "queued"] == [2, 1]  # moves up as the line shortens
+    assert all(r[-1]["type"] == "done" for r in (r1, r2, r3))  # a queued event never ends the stream
+    assert r2.index(next(e for e in r2 if e["type"] == "queued")) < r2.index(next(e for e in r2 if e["type"] == "partial"))
+
+
+async def test_waiting_for_the_local_model_is_reported_as_queued_too(service, monkeypatch):
+    import threading
+
+    from app.services.compute import heavy
+
+    class Local(FakeProvider):
+        async def stream(self, system, user, *, json_mode=False):
+            async with heavy.ahold("ollama"):
+                async for piece in FakeProvider.stream(self, system, user, json_mode=json_mode):
+                    yield piece
+
+    service.provider_factory = Local
+    release, started = threading.Event(), threading.Event()
+
+    def other_job():  # e.g. whisper transcribing a video
+        with heavy.hold("whisper"):
+            started.set()
+            release.wait(5)
+
+    t = threading.Thread(target=other_job)
+    t.start()
+    started.wait(2)
+    task = asyncio.create_task(collect(service.subscribe("A")))
+    await asyncio.sleep(0.2)
+    release.set()
+    events = await asyncio.wait_for(task, 3)
+    t.join()
+    assert events[0] == {"type": "queued", "position": 1} and events[-1]["type"] == "done"
