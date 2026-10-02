@@ -73,6 +73,17 @@ def test_nothing_outside_the_build_folder_is_ever_sent(site, raw):
         assert b"APP" in body
 
 
+@pytest.mark.parametrize("raw", [a for a in ATTEMPTS if a not in ("/etc/passwd", "/backend/.env/x", "/%2fetc%2fpasswd")])
+def test_every_attempt_to_reach_a_file_is_not_found(site, raw):
+    assert raw_get(site, raw)[0] == 404, raw
+
+
+def test_addresses_of_the_app_still_get_the_page(site):
+    for raw in ("/", "/videos/3", "/news", "/books/7", "/library"):
+        status, body = raw_get(site, raw)
+        assert status == 200 and b"APP" in body, raw
+
+
 def test_api_paths_are_never_answered_with_the_page(site):
     for raw in ("/api/../data/app.sqlite", "/api/nothing", "/api"):
         assert raw_get(site, raw)[0] == 404

@@ -24,6 +24,10 @@ def mount_frontend(app: FastAPI, dist: Path = FRONTEND_DIST) -> bool:
     async def page(path: str, request: Request):
         if request.method != "GET" or path == "api" or path.startswith("api/"):
             raise HTTPException(404, "找不到")  # only pages are served here; an unknown API address is an error
+        # Anything that is not an address of the app is "not found" rather than the page: climbing out of the folder,
+        # a NUL byte, a leading slash, a hidden name (.git, .env), or a last part with a dot (a file name: /.env, /app.sqlite, /openapi.json).
+        if "\x00" in path or path.startswith("/") or any(part.startswith(".") for part in path.split("/")) or ("." in path.rsplit("/", 1)[-1] and not (root / path).is_file()):
+            raise HTTPException(404, "找不到")
         try:
             candidate = (root / path).resolve()
             is_file = path and candidate.is_file() and root in candidate.parents

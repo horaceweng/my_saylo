@@ -66,12 +66,12 @@ OpenCode Zen 免費模型的注意事項（2026-10 查證）：免費模型是�
 
 ## Phase 3 — 安全強化（程式，Sonnet）
 
-- [ ] 3.1 **SSRF 防護**：使用者給的網址（新聞文章 `news.py`、RSS/Podcast 訂閱 `podcast.py`/`news.py`、YouTube 匯入）在連線前解析 DNS，拒絕 loopback、私有網段、link-local、`100.64.0.0/10`（Tailscale）、`.local`/`.ts.net`；redirect 後也要再檢查。YouTube 只接受 youtube.com / youtu.be。設定頁的雲端 URL 測試（`app_settings.py:213`）僅限管理員即可
-- [ ] 3.2 上傳驗證：書（EPUB/TXT）、Podcast 音訊、錄音的副檔名 + 實際內容（magic bytes / ffprobe）+ 大小上限，在讀進記憶體前就擋（串流讀取計數）
-- [ ] 3.3 確認 `mount_frontend` 只送出 `frontend/dist`，打 `/../.env`、`/api/../data/app.sqlite` 之類路徑回 404；`/api/settings` 回應不含完整 key（已有 `mask`，加測試鎖住）
-- [ ] 3.4 安全標頭 middleware：`X-Content-Type-Options: nosniff`、`Referrer-Policy: same-origin`、`X-Frame-Options: DENY`、`Permissions-Policy: microphone=(self)`；不加 CORS（同源，不需要）
-- [ ] 3.5 新增 `scripts/start-prod.sh`：同 `start.sh`，但綁 **127.0.0.1**:8000（Funnel 從本機轉進來，區網不再能直接連沒驗證的 port）、`--proxy-headers --forwarded-allow-ips 127.0.0.1`
-- [ ] 3.6 最後跑一次 `/security-review` 與 `/code-review high`，處理發現的問題
+- [x] 3.1 **SSRF 防護**：使用者給的網址（新聞文章 `news.py`、RSS/Podcast 訂閱 `podcast.py`/`news.py`、YouTube 匯入）在連線前解析 DNS，拒絕 loopback、私有網段、link-local、`100.64.0.0/10`（Tailscale）、`.local`/`.ts.net`；redirect 後也要再檢查。YouTube 只接受 youtube.com / youtu.be。設定頁的雲端 URL 測試（`app_settings.py:213`）僅限管理員即可
+- [x] 3.2 上傳驗證：書（EPUB/TXT）、Podcast 音訊、錄音的副檔名 + 實際內容（magic bytes / ffprobe）+ 大小上限，在讀進記憶體前就擋（串流讀取計數）
+- [x] 3.3 確認 `mount_frontend` 只送出 `frontend/dist`，打 `/../.env`、`/api/../data/app.sqlite` 之類路徑回 404；`/api/settings` 回應不含完整 key（已有 `mask`，加測試鎖住）
+- [x] 3.4 安全標頭 middleware：`X-Content-Type-Options: nosniff`、`Referrer-Policy: same-origin`、`X-Frame-Options: DENY`、`Permissions-Policy: microphone=(self)`；不加 CORS（同源，不需要）
+- [x] 3.5 新增 `scripts/start-prod.sh`：同 `start.sh`，但綁 **127.0.0.1**:8000（Funnel 從本機轉進來，區網不再能直接連沒驗證的 port）、`--proxy-headers --forwarded-allow-ips 127.0.0.1`
+- [x] 3.6 最後跑一次 `/security-review` 與 `/code-review high`，處理發現的問題（改由人工逐項審查 master..multi-user 全部 diff：補了請求大小上限、關閉公開的 /docs、retry/TTS 配額、登入依帳號限速、未知檔案路徑一律 404）
 
 驗證：pytest 全過；手動用 curl 試 SSRF（`http://127.0.0.1:11434`、`http://192.168.50.1`）被拒。
 
