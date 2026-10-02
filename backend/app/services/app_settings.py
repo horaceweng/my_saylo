@@ -107,8 +107,10 @@ def whisper_downloaded(repo: str) -> bool:
 
 
 def mask(secret: str) -> str:
-    """A key as the page may show it: only the last four characters."""
-    return "" if not secret else "••••" + secret[-4:]
+    """A key as the page may show it: only the last four characters (nothing at all of a short key)."""
+    if not secret:
+        return ""
+    return "••••" + secret[-4:] if len(secret) >= 12 else "••••"
 
 
 def _preset_out(p: CloudPreset) -> dict:

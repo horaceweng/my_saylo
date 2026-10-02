@@ -87,7 +87,8 @@ def test_media_list_can_be_filtered_by_kind(env, session):
 
 def test_audio_is_served_with_range_support_for_seeking(env, session):
     client, _, tmp, _ = env
-    audio = tmp / "ep.mp3"
+    (tmp / "audio").mkdir()
+    audio = tmp / "audio" / "ep.mp3"
     audio.write_bytes(bytes(range(256)) * 40)
     m = Media(kind="podcast", source_url="p", title="P", audio_path=str(audio))
     session.add(m)
@@ -101,7 +102,8 @@ def test_audio_is_served_with_range_support_for_seeking(env, session):
 
 def test_deleting_an_entry_removes_its_audio_unless_another_entry_uses_the_same_file(env, session):
     client, _, tmp, _ = env
-    audio = tmp / "shared.mp3"
+    (tmp / "audio").mkdir()
+    audio = tmp / "audio" / "shared.mp3"
     audio.write_bytes(b"x")
     a, b = Media(kind="podcast", source_url="a", title="A", audio_path=str(audio)), Media(kind="podcast", source_url="b", title="B", audio_path=str(audio))
     session.add_all([a, b])

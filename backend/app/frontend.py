@@ -24,8 +24,12 @@ def mount_frontend(app: FastAPI, dist: Path = FRONTEND_DIST) -> bool:
     async def page(path: str, request: Request):
         if request.method != "GET" or path == "api" or path.startswith("api/"):
             raise HTTPException(404, "找不到")  # only pages are served here; an unknown API address is an error
-        candidate = (root / path).resolve()
-        if path and candidate.is_file() and root in candidate.parents:
+        try:
+            candidate = (root / path).resolve()
+            is_file = path and candidate.is_file() and root in candidate.parents
+        except (OSError, ValueError):  # a NUL byte or an over-long name is just not a file
+            is_file = False
+        if is_file:
             return FileResponse(candidate)  # favicon.svg and the like
         return FileResponse(index)  # /videos/3, /news … are pages of the app
 

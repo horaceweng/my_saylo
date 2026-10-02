@@ -36,7 +36,8 @@ def said(text, prob=0.98):
 @pytest.fixture
 def env(client, session, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", tmp_path)
-    source = tmp_path / "video.wav"
+    (tmp_path / "audio").mkdir()
+    source = tmp_path / "audio" / "video.wav"
     source.write_bytes(wav_bytes(seconds=5))
     media = Media(source_url="u", external_id="abcdefghijk", title="T", status="ready", audio_path=str(source))
     session.add(media)

@@ -12,7 +12,7 @@ from app.config import settings
 from app.db import get_session
 from app.deps import current_user
 from app.models import Media, Recording, Segment, User
-from app.services import prompts, shadowing, uploads, usage
+from app.services import files, prompts, shadowing, uploads, usage
 from app.services.llm import LLMError, chat_json, make_provider
 from app.services.partial_json import parse_partial
 
@@ -53,8 +53,8 @@ def sentence_audio(segment_id: int, session: Session = Depends(get_session)):
     """The original speaker's audio for this one sentence (cut from the downloaded audio and cached)."""
     seg = _segment(session, segment_id)
     media = session.get(Media, seg.media_id)
-    source = Path(media.audio_path) if media and media.audio_path else None
-    if not source or not source.exists():
+    source = files.inside(media.audio_path, "audio") if media else None
+    if not source:
         raise HTTPException(404, "找不到原音檔，請重新處理這個影片")
     clip = _dir("clips") / f"seg{seg.id}_{int(seg.start * 1000)}_{int(seg.end * 1000)}.wav"
     if not clip.exists():
@@ -125,15 +125,17 @@ def _recording(session: Session, recording_id: int, user: User) -> Recording:
 @router.get("/recordings/{recording_id}/audio")
 def recording_audio(recording_id: int, session: Session = Depends(get_session), user: User = Depends(current_user)):
     rec = _recording(session, recording_id, user)
-    if not Path(rec.file_path).exists():
+    path = files.inside(rec.file_path, "recordings")
+    if not path:
         raise HTTPException(404, "錄音檔已不存在")
-    return FileResponse(rec.file_path, media_type="audio/wav")
+    return FileResponse(path, media_type="audio/wav")
 
 
 @router.delete("/recordings/{recording_id}")
 def delete_recording(recording_id: int, session: Session = Depends(get_session), user: User = Depends(current_user)):
     rec = _recording(session, recording_id, user)
-    Path(rec.file_path).unlink(missing_ok=True)
+    if path := files.inside(rec.file_path, "recordings"):
+        path.unlink(missing_ok=True)
     session.delete(rec)
     session.commit()
     return {"ok": True}

@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -9,7 +8,7 @@ from sqlmodel import Session, delete, func, select
 from app.db import get_session
 from app.deps import admin_user, current_user
 from app.models import Media, Segment, Setting, User, Word
-from app.services import pipeline, usage, youtube
+from app.services import files, pipeline, usage, youtube
 from app.services.grading import GRADING_VERSION, grade
 
 router = APIRouter(prefix="/api/media", tags=["media"])
@@ -146,9 +145,10 @@ def media_updates(media_id: int, known: int = 0, missing_from: int = 0, session:
 def media_audio(media_id: int, session: Session = Depends(get_session)):
     """The audio file itself (supports seeking), for the podcast player."""
     media = session.get(Media, media_id)
-    if not media or not media.audio_path or not Path(media.audio_path).exists():
+    path = files.inside(media.audio_path, "audio") if media else None
+    if not path:
         raise HTTPException(404, "找不到音檔")
-    return FileResponse(media.audio_path)
+    return FileResponse(path)
 
 
 @router.post("/{media_id}/focus")
@@ -194,5 +194,6 @@ def delete_media(media_id: int, session: Session = Depends(get_session), _: User
     session.commit()
     # The downloaded audio is only useful for this entry; free the disk unless another entry shares the file.
     if audio_path and not session.exec(select(Media.id).where(Media.audio_path == audio_path)).first():
-        Path(audio_path).unlink(missing_ok=True)
+        if path := files.inside(audio_path, "audio"):
+            path.unlink(missing_ok=True)
     return {"ok": True}
