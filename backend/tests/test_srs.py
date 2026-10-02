@@ -68,7 +68,7 @@ def test_the_gap_always_grows_at_least_a_day_for_a_remembered_phrase():
 
 
 def add(session, text_="break the ice", due_in_days=0.0, **kw):
-    p = SavedPhrase(text=text_, translation="打破僵局", due_at=srs.utcnow() + timedelta(days=due_in_days), **kw)
+    p = SavedPhrase(text=text_, translation="打破僵局", user_id=1, due_at=srs.utcnow() + timedelta(days=due_in_days), **kw)
     session.add(p)
     session.commit()
     session.refresh(p)

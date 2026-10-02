@@ -84,7 +84,7 @@ def test_upload_compares_the_recording_and_keeps_a_history(env, monkeypatch):
     assert 1.9 < body["duration"] < 2.1 and body["feedback"] is None
     # stored as a 16 kHz wav, and playable through the API; the raw upload is not left behind
     assert client.get(f"/api/recordings/{body['id']}/audio").status_code == 200
-    assert not list((tmp / "recordings").glob("*.upload"))
+    assert not list((tmp / "recordings").rglob("*.upload"))
     # second attempt shows up first in the history
     monkeypatch.setattr(shadowing, "transcribe_recording", lambda wav: said("Why does wasabi make your eyes water"))
     upload(client, seg.id, wav_bytes())
@@ -99,7 +99,7 @@ def test_upload_rejects_silence_garbage_and_empty_files(env, monkeypatch):
     assert upload(client, seg.id, b"this is not audio at all").status_code == 400
     assert upload(client, seg.id, b"").status_code == 400
     assert client.post("/api/segments/9999/recordings", files={"file": ("a.wav", wav_bytes(), "audio/wav")}).status_code == 404
-    assert not list((tmp / "recordings").glob("*"))  # failed uploads leave nothing behind
+    assert not [p for p in (tmp / "recordings").rglob("*") if p.is_file()]  # failed uploads leave nothing behind
 
 
 def test_upload_says_so_when_speech_recognition_is_busy(env, monkeypatch):
@@ -111,7 +111,7 @@ def test_upload_says_so_when_speech_recognition_is_busy(env, monkeypatch):
     monkeypatch.setattr(shadowing, "transcribe_recording", busy)
     res = upload(client, seg.id, wav_bytes())
     assert res.status_code == 503 and "稍後" in res.json()["detail"]
-    assert not list((tmp / "recordings").glob("*"))
+    assert not [p for p in (tmp / "recordings").rglob("*") if p.is_file()]
 
 
 def test_a_recording_that_recognises_nothing_scores_zero(env, monkeypatch):

@@ -1,10 +1,13 @@
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 from sqlmodel.pool import StaticPool
 
+from app.config import settings
 from app.db import get_session
 from app.main import app
+from app.models import User
+from app.services import auth
 
 
 class FakeLLM:
@@ -34,11 +37,50 @@ def fake_llm():
     return FakeLLM
 
 
+PASSWORD = "correct horse battery"
+
+
+@pytest.fixture(autouse=True)
+def plain_http_cookies(monkeypatch):
+    monkeypatch.setattr(settings, "cookie_secure", False)  # the test client talks http
+
+
 @pytest.fixture
-def client(session, monkeypatch):
+def make_client(session, monkeypatch):
+    """Build a client for one user: `make_client("bob")` creates the account (once) and logs in; no name = not logged in."""
     app.dependency_overrides[get_session] = lambda: session
     FakeLLM.replies, FakeLLM.calls = {}, 0
     for module in ("ai", "dictionary"):
         monkeypatch.setattr(f"app.routers.{module}.make_provider", FakeLLM)
-    yield TestClient(app)
+
+    def build(username: str | None = None, admin: bool = False) -> TestClient:
+        c = TestClient(app)
+        if username:
+            if not session.exec(select(User).where(User.username == username)).first():
+                auth.create_user(session, username, PASSWORD, is_admin=admin)
+            assert c.post("/api/auth/login", json={"username": username, "password": PASSWORD}).status_code == 200
+        return c
+
+    yield build
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def client(make_client):
+    """Logged in as an admin, so the existing tests keep seeing everything."""
+    return make_client("admin", admin=True)
+
+
+@pytest.fixture
+def user_client(make_client):
+    return make_client("alice")
+
+
+@pytest.fixture
+def other_client(make_client):
+    return make_client("bob")
+
+
+@pytest.fixture
+def anon_client(make_client):
+    return make_client()
