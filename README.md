@@ -18,10 +18,20 @@ ollama serve            # 另開一個終端機（已經在背景執行就不用
 
 之後只要 `./scripts/start.sh`；前端程式有改動時會自動重新建置。
 
+## 帳號
+
+所有 API 都要登入。第一次使用先建立管理員（舊的片語與錄音會歸給他）：
+
+```bash
+cd backend && uv run python scripts/create_admin.py <帳號>
+```
+
+之後管理員在「👥 使用者」頁產生邀請連結給別人註冊；只有管理員能看設定頁、刪除影片／書／訂閱。登入 cookie 預設只在 https 傳送；`start.sh` 在本機 http 使用時自動設 `COOKIE_SECURE=false`，用 `fastapi dev` 時請自己加上同一個環境變數。
+
 ## 開發
 
 ```bash
-cd backend  && uv run fastapi dev app/main.py     # API，port 8000
+cd backend  && COOKIE_SECURE=false uv run fastapi dev app/main.py     # API，port 8000
 cd frontend && npm run dev                        # 畫面，http://localhost:5173（/api 會轉到 8000）
 cd backend  && uv run pytest                      # 後端測試
 cd frontend && npx vitest run && npx tsc -b       # 前端測試與型別檢查

@@ -280,6 +280,25 @@ export interface AppSettings {
   whisper_models: { repo: string; label: string; size: string; note: string; downloaded: boolean }[]
 }
 
+export interface User {
+  id: number
+  username: string
+  is_admin: boolean
+}
+
+export interface AdminUser extends User {
+  disabled: boolean
+  created_at: string
+}
+
+export interface Invite {
+  code: string
+  state: 'open' | 'used' | 'expired'
+  created_at: string
+  expires_at: string
+  used_by: string | null
+}
+
 export interface Health {
   ok: boolean
   llm_backend?: 'ollama' | 'cloud'

@@ -1,4 +1,4 @@
-import { Link, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import Home from './pages/Home'
 import Phrases from './pages/Phrases'
 import VideoList from './pages/VideoList'
@@ -10,9 +10,14 @@ import Review from './pages/Review'
 import Settings from './pages/Settings'
 import ErrorBoundary from './components/ErrorBoundary'
 import SystemBanner from './components/SystemBanner'
+import Login from './pages/Login'
+import Register from './pages/Register'
+import Users from './pages/Users'
+import { AuthContext, useAuth, useSession } from './hooks/useAuth'
 
 function TopNav() {
   const { pathname } = useLocation()
+  const { user, logout } = useAuth()
   // The player page uses the whole viewport
   if (/^\/(videos|podcasts|books|news)\/\d+/.test(pathname)) return null
   return (
@@ -23,7 +28,12 @@ function TopNav() {
         <Link to="/library" className="text-slate-600 hover:text-indigo-600 dark:text-slate-300">書籍</Link>
         <Link to="/news" className="text-slate-600 hover:text-indigo-600 dark:text-slate-300">新聞</Link>
         <Link to="/phrases" className="ml-auto text-slate-600 hover:text-indigo-600 dark:text-slate-300">⭐ 片語庫</Link>
-        <Link to="/settings" className="text-slate-600 hover:text-indigo-600 dark:text-slate-300">⚙️ 設定</Link>
+        {user.is_admin && <Link to="/admin/users" className="text-slate-600 hover:text-indigo-600 dark:text-slate-300">👥 使用者</Link>}
+        {user.is_admin && <Link to="/settings" className="text-slate-600 hover:text-indigo-600 dark:text-slate-300">⚙️ 設定</Link>}
+        <span className="flex items-center gap-2 border-l border-slate-200 pl-4 text-slate-500 dark:border-slate-700">
+          <span>{user.username}</span>
+          <button onClick={logout} className="hover:text-indigo-600">登出</button>
+        </span>
       </div>
     </nav>
   )
@@ -39,7 +49,11 @@ function NotFound() {
   )
 }
 
-export default function App() {
+function AdminOnly({ children }: { children: React.ReactNode }) {
+  return useAuth().user.is_admin ? <>{children}</> : <NotFound />
+}
+
+function AppPages() {
   const { pathname } = useLocation()
   return (
     <>
@@ -53,7 +67,10 @@ export default function App() {
         <Route path="/podcasts/:id" element={<MediaPage />} />
         <Route path="/phrases" element={<Phrases />} />
         <Route path="/phrases/review" element={<Review />} />
-        <Route path="/settings" element={<Settings />} />
+        <Route path="/settings" element={<AdminOnly><Settings /></AdminOnly>} />
+        <Route path="/admin/users" element={<AdminOnly><Users /></AdminOnly>} />
+        <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route path="/register" element={<Navigate to="/" replace />} />
         <Route path="/library" element={<Library />} />
         <Route path="/books/:id" element={<BookReader />} />
         <Route path="/news" element={<News />} />
@@ -62,5 +79,27 @@ export default function App() {
       </Routes>
       </ErrorBoundary>
     </>
+  )
+}
+
+/** Nothing of the app is shown until we know who is using it; with nobody logged in it is the login page (or the sign-up page for an invite link). */
+export default function App() {
+  const { pathname } = useLocation()
+  const session = useSession()
+  const { user, error } = session
+  if (error) {
+    return (
+      <main className="mx-auto max-w-sm px-4 py-20 text-center">
+        <p className="mb-4 text-rose-500">{error}</p>
+        <button onClick={session.retry} className="rounded-lg bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500">再試一次</button>
+      </main>
+    )
+  }
+  if (user === undefined) return null
+  if (user === null) return pathname === '/register' ? <Register onRegistered={session.setUser} /> : <Login onLogin={session.setUser} />
+  return (
+    <AuthContext.Provider value={{ user, logout: session.logout }}>
+      <AppPages />
+    </AuthContext.Provider>
   )
 }

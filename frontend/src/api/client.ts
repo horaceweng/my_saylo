@@ -1,9 +1,19 @@
+import { notifyUnauthorized } from '../lib/auth'
 import { readNdjson } from './ndjson'
 import type {
   AppSettings, Health, PartialEnrichment, ReviewPhrase, ReviewQueue, WordEnrichment,
   Book, BookChapter, BookDetail, FeedItem, GutenbergResult, Media, NewsFeed, MediaDetail, MediaUpdates, PartialExplanation, PartialFeedback, RootResult, SavedPhrase, SentenceExplanation, ShadowFeedback,
+  AdminUser, Invite, User,
   PodcastChannel, PodcastLookup, PodcastShow, ShadowRecording, TtsStatus, WordResult,
 } from './types'
+
+/** Calls that may answer 401 as part of their job (a wrong password) do not send the learner back to the login page. */
+const OWN_401 = /^\/auth\/(login|register|me)$/
+
+/** A 401 means the login ended (or never happened): the app shows the login page. */
+function checkLoggedIn(res: Response, path = ''): void {
+  if (res.status === 401 && !OWN_401.test(path)) notifyUnauthorized()
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response
@@ -15,6 +25,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new Error('連不上後端，請確認已啟動 fastapi（port 8000）')
   }
+  checkLoggedIn(res, path)
   if (!res.ok) {
     const body = await res.json().catch(() => null)
     throw new Error(body?.detail ?? `請求失敗（${res.status}）`)
@@ -48,7 +59,8 @@ export async function streamExplain(
     if ((e as Error).name === 'AbortError') throw e
     throw new Error('連不上後端，請確認已啟動 fastapi（port 8000）')
   }
-  if (!res.ok || !res.body) throw new Error(`請求失敗（${res.status}）`)
+  checkLoggedIn(res)
+  if (!res.ok || !res.body) throw new Error(res.status === 401 ? '請先登入' : `請求失敗（${res.status}）`)
   for await (const event of readNdjson<ExplainEvent>(res.body)) {
     if (event.type === 'partial') onPartial(event.data)
     else if (event.type === 'done') return event.data
@@ -75,7 +87,8 @@ export async function streamFeedback(
     if ((e as Error).name === 'AbortError') throw e
     throw new Error('連不上後端，請確認已啟動 fastapi（port 8000）')
   }
-  if (!res.ok || !res.body) throw new Error(`請求失敗（${res.status}）`)
+  checkLoggedIn(res)
+  if (!res.ok || !res.body) throw new Error(res.status === 401 ? '請先登入' : `請求失敗（${res.status}）`)
   for await (const event of readNdjson<FeedbackEvent>(res.body)) {
     if (event.type === 'partial') onPartial(event.data)
     else if (event.type === 'done') return event.data
@@ -93,7 +106,8 @@ export async function streamParagraphTranslation(paragraphId: number, onPartial:
     if ((e as Error).name === 'AbortError') throw e
     throw new Error('連不上後端，請確認已啟動 fastapi（port 8000）')
   }
-  if (!res.ok || !res.body) throw new Error(`請求失敗（${res.status}）`)
+  checkLoggedIn(res)
+  if (!res.ok || !res.body) throw new Error(res.status === 401 ? '請先登入' : `請求失敗（${res.status}）`)
   for await (const event of readNdjson<{ type: 'partial' | 'done' | 'error'; text?: string; message?: string }>(res.body)) {
     if (event.type === 'partial') onPartial(event.text ?? '')
     else if (event.type === 'done') return event.text ?? ''
@@ -111,7 +125,8 @@ export async function streamWordEnrichment(word: string, onPartial: (partial: Pa
     if ((e as Error).name === 'AbortError') throw e
     throw new Error('連不上後端，請確認已啟動 fastapi（port 8000）')
   }
-  if (!res.ok || !res.body) throw new Error(`請求失敗（${res.status}）`)
+  checkLoggedIn(res)
+  if (!res.ok || !res.body) throw new Error(res.status === 401 ? '請先登入' : `請求失敗（${res.status}）`)
   for await (const event of readNdjson<{ type: 'partial' | 'done' | 'error'; data?: PartialEnrichment; message?: string }>(res.body)) {
     if (event.type === 'partial') onPartial(event.data ?? {})
     else if (event.type === 'done') return event.data as WordEnrichment
@@ -142,6 +157,7 @@ export async function fetchSpeech(text: string, voice: string): Promise<string> 
   } catch {
     throw new Error('連不上後端，請確認已啟動 fastapi（port 8000）')
   }
+  checkLoggedIn(res)
   if (!res.ok) {
     const body = await res.json().catch(() => null)
     throw new Error(body?.detail ?? `語音產生失敗（${res.status}）`)
@@ -154,6 +170,14 @@ export const sentenceAudioUrl = (segmentId: number) => `/api/segments/${segmentI
 export const recordingAudioUrl = (recordingId: number) => `/api/recordings/${recordingId}/audio`
 
 export const api = {
+  me: () => request<User>('/auth/me'),
+  login: (username: string, password: string) => request<User>('/auth/login', post({ username, password })),
+  register: (code: string, username: string, password: string) => request<User>('/auth/register', post({ code, username, password })),
+  logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+  adminUsers: () => request<AdminUser[]>('/admin/users'),
+  setUserDisabled: (id: number, disabled: boolean) => request<{ id: number; disabled: boolean }>(`/admin/users/${id}/${disabled ? 'disable' : 'enable'}`, { method: 'POST' }),
+  adminInvites: () => request<Invite[]>('/admin/invites'),
+  createInvite: (days = 7) => request<Invite>('/admin/invites', post({ days })),
   listMedia: (kind?: 'video' | 'podcast') => request<Media[]>(`/media${kind ? `?kind=${kind}` : ''}`),
   getMedia: (id: number) => request<MediaDetail>(`/media/${id}`),
   getUpdates: (id: number, known: number, missingFrom: number) =>
