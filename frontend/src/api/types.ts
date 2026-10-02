@@ -21,6 +21,8 @@ export interface Media {
   covered_until: number
   /** Enough is ready to start studying even though processing goes on. */
   playable: boolean
+  /** While waiting to be processed: how many jobs are ahead (0 when it is running or not waiting). */
+  queue_position: number
 }
 
 export interface TimedWord {
@@ -273,6 +275,8 @@ export interface AppSettings {
   stt_base_url: string
   stt_model: string
   stt_key: string
+  /** When the cloud service fails, do the work on the local model instead. */
+  fallback_local: boolean
   llm_presets: CloudPreset[]
   stt_presets: CloudPreset[]
   ollama_ok: boolean
@@ -289,6 +293,19 @@ export interface User {
 export interface AdminUser extends User {
   disabled: boolean
   created_at: string
+  usage_today: { media: number; audio_minutes: number; ai: number }
+}
+
+export interface FallbackCounts {
+  today: number
+  week: number
+}
+
+/** The daily limits, and how often the cloud service failed and the local model took over. */
+export interface AdminUsage {
+  limits: { media: number; audio_minutes: number; ai: number }
+  fallbacks: { llm: FallbackCounts; stt: FallbackCounts }
+  resets_at: string
 }
 
 export interface Invite {

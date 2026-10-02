@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { streamExplain } from '../api/client'
 import type { PartialExplanation } from '../api/types'
+import { queueText } from '../lib/mediaStatus'
 import SidePanel, { Section } from './SidePanel'
 
 interface Props {
@@ -13,11 +14,12 @@ export default function ExplainPanel({ sentence, context, onClose }: Props) {
   const [data, setData] = useState<PartialExplanation | null>(null)
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
+  const [ahead, setAhead] = useState(0)
 
   useEffect(() => {
     const abort = new AbortController()
-    setData(null); setDone(false); setError('')
-    streamExplain(sentence, context, setData, abort.signal)
+    setData(null); setDone(false); setError(''); setAhead(0)
+    streamExplain(sentence, context, (partial) => { setAhead(0); setData(partial) }, abort.signal, setAhead)
       .then((final) => { setData(final); setDone(true) })
       .catch((e: Error) => e.name !== 'AbortError' && setError(e.message))
     return () => abort.abort()
@@ -31,7 +33,9 @@ export default function ExplainPanel({ sentence, context, onClose }: Props) {
     <SidePanel title="AI 句子說明" onClose={onClose}>
       <p className="mb-4 rounded-lg bg-slate-100 p-3 text-lg dark:bg-slate-800">{sentence}</p>
       {error && <p className="text-rose-500">{error}</p>}
-      {!data && !error && <p className="text-slate-400">AI 分析中…</p>}
+      {!data && !error && (ahead > 0
+        ? <p className="text-amber-600 dark:text-amber-400" data-queued>{queueText(ahead)}…</p>
+        : <p className="text-slate-400">AI 分析中…</p>)}
       {data && (
         <>
           {data.translation && <Section title="翻譯"><p>{data.translation}</p></Section>}

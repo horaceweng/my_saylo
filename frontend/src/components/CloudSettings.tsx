@@ -158,6 +158,36 @@ export default function CloudSettings({ settings, onSaved }: Props) {
         patch={({ cloud, baseUrl, model, key }) => ({ stt_backend: cloud ? 'cloud' : 'local', stt_base_url: baseUrl, stt_model: model, ...(key !== undefined ? { stt_api_key: key } : {}) })}
         onSaved={onSaved}
       />
+      <div className="border-t border-slate-200 dark:border-slate-700" />
+      <FallbackToggle settings={settings} onSaved={onSaved} />
     </section>
+  )
+}
+
+/** Whether a failing cloud service is covered by the local model. */
+function FallbackToggle({ settings, onSaved }: Props) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const change = async (on: boolean) => {
+    setBusy(true); setError('')
+    try {
+      onSaved(await api.updateSettings({ fallback_local: on }))
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="py-3">
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" className="mt-1" checked={settings.fallback_local} disabled={busy} onChange={(e) => change(e.target.checked)} />
+        <span>
+          <span className="font-medium">雲端失敗時改用本地模型</span>
+          <span className="block text-slate-500">連不上、逾時、被限流（429）、伺服器錯誤或回覆不是有效 JSON 時，這一次改由這台電腦的 Ollama／Whisper 處理。本地一次只會載入一個模型（記憶體 16 GB），所以會比較慢，也可能要排隊。關閉後雲端失敗就直接顯示錯誤。</span>
+        </span>
+      </label>
+      {error && <p role="alert" className="mt-1 text-sm text-rose-500">{error}</p>}
+    </div>
   )
 }

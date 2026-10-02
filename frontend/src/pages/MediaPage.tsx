@@ -16,7 +16,7 @@ import YouTubePlayer from '../components/players/YouTubePlayer'
 import type { PlayerAdapter } from '../components/players/types'
 import { usePlaybackClock } from '../hooks/usePlaybackClock'
 import { firstUntranslated, mergeUpdates, pollInterval } from '../lib/mediaUpdates'
-import { STATUS_LABELS, isProcessing } from '../lib/mediaStatus'
+import { isProcessing, statusText } from '../lib/mediaStatus'
 
 const RATES = [0.75, 1, 1.25]
 
@@ -134,7 +134,7 @@ export default function MediaPage() {
       <main className="mx-auto max-w-xl px-4 py-16 text-center">
         <h1 className="mb-6 text-xl font-semibold">{media.title}</h1>
         <p className={media.status === 'error' ? 'text-rose-500' : 'text-indigo-500'}>
-          {STATUS_LABELS[media.status]}{isProcessing(media) && ` ${media.progress}%`}
+          {statusText(media)}
         </p>
         {isProcessing(media) && (
           <div className="mx-auto mt-3 h-2 max-w-sm overflow-hidden rounded bg-slate-200 dark:bg-slate-700">

@@ -19,8 +19,15 @@ export function mediaPath(m: { id: number; kind: string }, position?: number): s
   return position === undefined ? base : `${base}?t=${position}`
 }
 
-/** The status line of a card: says when it can already be opened although processing goes on. */
+/** "Waiting, N jobs ahead" for something in a line (a media job or an AI request); '' when nobody is ahead. */
+export function queueText(ahead: number): string {
+  return ahead > 0 ? `排隊中，前面還有 ${ahead} 個` : ''
+}
+
+/** The status line of a card: says when it can already be opened although processing goes on,
+ * and how many jobs are ahead while it waits its turn. */
 export function statusText(m: Media): string {
+  if (m.status === 'pending' && m.queue_position > 0) return queueText(m.queue_position)
   if (m.playable && isProcessing(m)) return `可以開始看 · ${STATUS_LABELS[m.status]} ${m.progress}%`
   return `${STATUS_LABELS[m.status]}${isProcessing(m) ? ` ${m.progress}%` : ''}`
 }

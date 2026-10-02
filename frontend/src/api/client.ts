@@ -3,7 +3,7 @@ import { readNdjson } from './ndjson'
 import type {
   AppSettings, Health, PartialEnrichment, ReviewPhrase, ReviewQueue, WordEnrichment,
   Book, BookChapter, BookDetail, FeedItem, GutenbergResult, Media, NewsFeed, MediaDetail, MediaUpdates, PartialExplanation, PartialFeedback, RootResult, SavedPhrase, SentenceExplanation, ShadowFeedback,
-  AdminUser, Invite, User,
+  AdminUsage, AdminUser, Invite, User,
   PodcastChannel, PodcastLookup, PodcastShow, ShadowRecording, TtsStatus, WordResult,
 } from './types'
 
@@ -33,19 +33,29 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json()
 }
 
+/** Why a streaming call was refused: the server's own words when it gave any (a daily limit says which and until when). */
+async function streamFailure(res: Response): Promise<Error> {
+  if (res.status === 401) return new Error('請先登入')
+  const body = await res.json().catch(() => null)
+  return new Error(typeof body?.detail === 'string' ? body.detail : `請求失敗（${res.status}）`)
+}
+
 const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) })
 
 type ExplainEvent =
+  | { type: 'queued'; position: number }
   | { type: 'partial'; data: PartialExplanation }
   | { type: 'done'; data: SentenceExplanation }
   | { type: 'error'; message: string }
 
-/** Ask for a sentence explanation and receive it as it is written. Resolves with the final answer. */
+/** Ask for a sentence explanation and receive it as it is written. Resolves with the final answer.
+ * `onQueued` hears how many jobs are ahead while the request waits for its turn. */
 export async function streamExplain(
   sentence: string,
   context: string,
   onPartial: (partial: PartialExplanation) => void,
   signal: AbortSignal,
+  onQueued?: (ahead: number) => void,
 ): Promise<SentenceExplanation> {
   let res: Response
   try {
@@ -60,9 +70,10 @@ export async function streamExplain(
     throw new Error('連不上後端，請確認已啟動 fastapi（port 8000）')
   }
   checkLoggedIn(res)
-  if (!res.ok || !res.body) throw new Error(res.status === 401 ? '請先登入' : `請求失敗（${res.status}）`)
+  if (!res.ok || !res.body) throw await streamFailure(res)
   for await (const event of readNdjson<ExplainEvent>(res.body)) {
-    if (event.type === 'partial') onPartial(event.data)
+    if (event.type === 'queued') onQueued?.(event.position)
+    else if (event.type === 'partial') onPartial(event.data)
     else if (event.type === 'done') return event.data
     else throw new Error(event.message)
   }
@@ -88,7 +99,7 @@ export async function streamFeedback(
     throw new Error('連不上後端，請確認已啟動 fastapi（port 8000）')
   }
   checkLoggedIn(res)
-  if (!res.ok || !res.body) throw new Error(res.status === 401 ? '請先登入' : `請求失敗（${res.status}）`)
+  if (!res.ok || !res.body) throw await streamFailure(res)
   for await (const event of readNdjson<FeedbackEvent>(res.body)) {
     if (event.type === 'partial') onPartial(event.data)
     else if (event.type === 'done') return event.data
@@ -107,7 +118,7 @@ export async function streamParagraphTranslation(paragraphId: number, onPartial:
     throw new Error('連不上後端，請確認已啟動 fastapi（port 8000）')
   }
   checkLoggedIn(res)
-  if (!res.ok || !res.body) throw new Error(res.status === 401 ? '請先登入' : `請求失敗（${res.status}）`)
+  if (!res.ok || !res.body) throw await streamFailure(res)
   for await (const event of readNdjson<{ type: 'partial' | 'done' | 'error'; text?: string; message?: string }>(res.body)) {
     if (event.type === 'partial') onPartial(event.text ?? '')
     else if (event.type === 'done') return event.text ?? ''
@@ -126,7 +137,7 @@ export async function streamWordEnrichment(word: string, onPartial: (partial: Pa
     throw new Error('連不上後端，請確認已啟動 fastapi（port 8000）')
   }
   checkLoggedIn(res)
-  if (!res.ok || !res.body) throw new Error(res.status === 401 ? '請先登入' : `請求失敗（${res.status}）`)
+  if (!res.ok || !res.body) throw await streamFailure(res)
   for await (const event of readNdjson<{ type: 'partial' | 'done' | 'error'; data?: PartialEnrichment; message?: string }>(res.body)) {
     if (event.type === 'partial') onPartial(event.data ?? {})
     else if (event.type === 'done') return event.data as WordEnrichment
@@ -148,6 +159,7 @@ export interface SettingsPatch {
   stt_base_url?: string
   stt_api_key?: string
   stt_model?: string
+  fallback_local?: boolean
 }
 
 export async function fetchSpeech(text: string, voice: string): Promise<string> {
@@ -176,6 +188,7 @@ export const api = {
   logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
   adminUsers: () => request<AdminUser[]>('/admin/users'),
   setUserDisabled: (id: number, disabled: boolean) => request<{ id: number; disabled: boolean }>(`/admin/users/${id}/${disabled ? 'disable' : 'enable'}`, { method: 'POST' }),
+  adminUsage: () => request<AdminUsage>('/admin/usage'),
   adminInvites: () => request<Invite[]>('/admin/invites'),
   createInvite: (days = 7) => request<Invite>('/admin/invites', post({ days })),
   listMedia: (kind?: 'video' | 'podcast') => request<Media[]>(`/media${kind ? `?kind=${kind}` : ''}`),

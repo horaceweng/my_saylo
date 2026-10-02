@@ -6,7 +6,7 @@ const seg = (idx: number, translation = ''): Segment => ({ id: idx, idx, start: 
 
 const base = (segments: Segment[]): MediaDetail => ({
   id: 1, kind: 'video', source_url: '', external_id: '', title: 'T', thumbnail: '', duration: 600, status: 'transcribing', progress: 20, error: '',
-  transcribed: false, level: '', sentence_count: segments.length, translated_count: segments.filter((s) => s.translation).length, covered_until: 0, playable: false, segments,
+  transcribed: false, level: '', sentence_count: segments.length, translated_count: segments.filter((s) => s.translation).length, covered_until: 0, playable: false, queue_position: 0, segments,
 })
 
 const updates = (over: Partial<MediaUpdates> = {}): MediaUpdates => {

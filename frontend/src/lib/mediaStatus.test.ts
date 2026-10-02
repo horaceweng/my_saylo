@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { Media } from '../api/types'
-import { formatDuration, isProcessing, mediaPath, statusText } from './mediaStatus'
+import { formatDuration, isProcessing, mediaPath, queueText, statusText } from './mediaStatus'
 
 const media = (over: Partial<Media>): Media => ({
   id: 7, kind: 'video', source_url: '', external_id: '', title: 'T', thumbnail: '', duration: 0, status: 'ready', progress: 100, error: '',
-  transcribed: true, level: '', sentence_count: 0, translated_count: 0, covered_until: 0, playable: true, ...over,
+  transcribed: true, level: '', sentence_count: 0, translated_count: 0, covered_until: 0, playable: true, queue_position: 0, ...over,
 })
 
 describe('mediaPath', () => {
@@ -16,6 +16,18 @@ describe('mediaPath', () => {
     expect(mediaPath({ id: 3, kind: 'book' }, 41)).toBe('/books/3?p=41')  // a paragraph number, not seconds
     expect(mediaPath({ id: 9, kind: 'news' })).toBe('/news/9')
     expect(mediaPath({ id: 9, kind: 'news' }, 2)).toBe('/news/9?p=2')
+  })
+})
+
+describe('queue position', () => {
+  it('says how many jobs are ahead while waiting for a turn', () => {
+    expect(statusText(media({ status: 'pending', progress: 0, playable: false, queue_position: 2 }))).toBe('排隊中，前面還有 2 個')
+    expect(queueText(1)).toBe('排隊中，前面還有 1 個')
+  })
+  it('is plain "waiting" when nobody is ahead, and ignored once the job runs', () => {
+    expect(queueText(0)).toBe('')
+    expect(statusText(media({ status: 'pending', progress: 0, playable: false, queue_position: 0 }))).toBe('排隊中 0%')
+    expect(statusText(media({ status: 'transcribing', progress: 30, playable: false, queue_position: 3 }))).toBe('語音轉文字 30%')
   })
 })
 
