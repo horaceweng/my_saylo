@@ -7,7 +7,8 @@ from sqlalchemy import case
 from sqlmodel import Session, delete, func, select
 
 from app.db import get_session
-from app.models import Media, Segment, Setting, Word
+from app.deps import admin_user, current_user
+from app.models import Media, Segment, Setting, User, Word
 from app.services import pipeline, youtube
 from app.services.grading import GRADING_VERSION, grade
 
@@ -78,7 +79,7 @@ def _segments(session: Session, media_id: int, from_idx: int = 0) -> list[dict]:
 
 
 @router.post("")
-async def create_media(body: CreateMedia, session: Session = Depends(get_session)):
+async def create_media(body: CreateMedia, session: Session = Depends(get_session), user: User = Depends(current_user)):
     video_id = youtube.extract_video_id(body.url)
     if not video_id:
         raise HTTPException(400, "這不是有效的 YouTube 網址")
@@ -89,7 +90,7 @@ async def create_media(body: CreateMedia, session: Session = Depends(get_session
         info = await youtube.fetch_info_async(video_id)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"無法取得影片資訊：{str(e)[:200]}") from e
-    media = Media(kind="video", source_url=body.url, external_id=video_id, **info)
+    media = Media(kind="video", source_url=body.url, external_id=video_id, added_by=user.id, **info)
     session.add(media)
     session.commit()
     session.refresh(media)
@@ -177,7 +178,7 @@ def retry_media(media_id: int, restart: bool = False, session: Session = Depends
 
 
 @router.delete("/{media_id}")
-def delete_media(media_id: int, session: Session = Depends(get_session)):
+def delete_media(media_id: int, session: Session = Depends(get_session), _: User = Depends(admin_user)):
     media = session.get(Media, media_id)
     if not media:
         raise HTTPException(404, "找不到這個影片")

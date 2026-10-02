@@ -5,7 +5,8 @@ from pydantic import BaseModel
 from sqlmodel import Session, col, func, select
 
 from app.db import engine, get_session
-from app.models import Book, Feed, Setting
+from app.deps import admin_user, current_user
+from app.models import Book, Feed, Setting, User
 from app.routers.books import book_out, store_book
 from app.services import books, news
 from app.services.books import BookError, ParsedBook, ParsedChapter
@@ -43,7 +44,7 @@ def list_feeds(session: Session = Depends(get_session)):
 
 
 @router.post("/feeds")
-async def add_feed(body: FeedIn, session: Session = Depends(get_session)):
+async def add_feed(body: FeedIn, session: Session = Depends(get_session), user: User = Depends(current_user)):
     """Follow a feed. It is opened once first, so a link that is not a feed is refused with a reason."""
     try:
         url = news.check_url(body.url)
@@ -53,7 +54,7 @@ async def add_feed(body: FeedIn, session: Session = Depends(get_session)):
         title, _ = await asyncio.to_thread(news.read_feed, url)
     except NewsError as e:
         raise HTTPException(400, str(e)) from e
-    feed = Feed(url=url, title=title)
+    feed = Feed(url=url, title=title, added_by=user.id)
     session.add(feed)
     session.commit()
     session.refresh(feed)
@@ -61,7 +62,7 @@ async def add_feed(body: FeedIn, session: Session = Depends(get_session)):
 
 
 @router.delete("/feeds/{feed_id}")
-def delete_feed(feed_id: int, session: Session = Depends(get_session)):
+def delete_feed(feed_id: int, session: Session = Depends(get_session), _: User = Depends(admin_user)):
     feed = session.get(Feed, feed_id)
     if not feed or feed.kind != "news":
         raise HTTPException(404, "找不到這個訂閱")
@@ -93,7 +94,7 @@ async def feed_items(feed_id: int, limit: int = 30, session: Session = Depends(g
 
 
 @router.post("/articles")
-async def add_article(body: ArticleIn, session: Session = Depends(get_session)):
+async def add_article(body: ArticleIn, session: Session = Depends(get_session), user: User = Depends(current_user)):
     """Fetch a page, keep the article text, estimate its level and store it ready to read."""
     try:
         url = news.check_url(body.url)
@@ -102,13 +103,13 @@ async def add_article(body: ArticleIn, session: Session = Depends(get_session)):
     key = news.url_key(url)
     if found := session.exec(select(Book).where(Book.source_key == key)).first():
         return book_out(found)
-    bind = session.get_bind()
+    bind, user_id = session.get_bind(), user.id
 
     def work() -> Book:
         article = news.read_article(url)
         parsed = books.finalize(ParsedBook(article.title, article.author, [ParsedChapter(article.title, article.paragraphs)]))
         with Session(bind) as s:
-            return store_book(s, parsed, "news", key, cover=article.image, url=article.url, published=article.published, site=article.site)
+            return store_book(s, parsed, "news", key, cover=article.image, url=article.url, published=article.published, site=article.site, added_by=user_id)
 
     try:
         return book_out(await asyncio.to_thread(work))

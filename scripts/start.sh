@@ -19,6 +19,8 @@ if [ ! -f dist/index.html ] || [ -n "$(find src index.html package.json -newer d
 fi
 
 cd "$ROOT/backend"
+# This is plain http on localhost, where a Secure login cookie would never be sent back.
+export COOKIE_SECURE="${COOKIE_SECURE:-false}"
 echo "開啟 http://localhost:8000（之後這裡只會顯示警告與錯誤，按 Ctrl+C 結束）"
 # Quiet unless something goes wrong: no start-up banner, no line per request; warnings and errors still show.
 exec uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level warning --no-access-log

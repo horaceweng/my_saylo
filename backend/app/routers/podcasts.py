@@ -9,7 +9,8 @@ from sqlmodel import Session, select
 
 from app.config import settings
 from app.db import get_session
-from app.models import Feed, Media
+from app.deps import admin_user, current_user
+from app.models import Feed, Media, User
 from app.routers.media import media_out, media_stats
 from app.services import pipeline, podcast
 from app.services.podcast import PodcastError
@@ -57,7 +58,7 @@ def list_channels(session: Session = Depends(get_session)):
 
 
 @router.post("/channels")
-async def add_channel(body: ChannelIn, session: Session = Depends(get_session)):
+async def add_channel(body: ChannelIn, session: Session = Depends(get_session), user: User = Depends(current_user)):
     """Follow a podcast. The feed is opened once first, so a link that is not a podcast feed is refused with a reason."""
     try:
         url = podcast.check_url(body.url)
@@ -69,7 +70,7 @@ async def add_channel(body: ChannelIn, session: Session = Depends(get_session)):
         raise HTTPException(400, str(e)) from e
     if found["type"] != "feed":
         raise HTTPException(400, "這是單一音檔的連結，不是 Podcast 節目的 RSS 網址")
-    feed = Feed(kind="podcast", url=url, title=found["title"] or url, image=found.get("image") or "")
+    feed = Feed(kind="podcast", url=url, title=found["title"] or url, image=found.get("image") or "", added_by=user.id)
     session.add(feed)
     session.commit()
     session.refresh(feed)
@@ -77,7 +78,7 @@ async def add_channel(body: ChannelIn, session: Session = Depends(get_session)):
 
 
 @router.delete("/channels/{channel_id}")
-def delete_channel(channel_id: int, session: Session = Depends(get_session)):
+def delete_channel(channel_id: int, session: Session = Depends(get_session), _: User = Depends(admin_user)):
     """Stop following. Episodes already loaded stay in the library."""
     session.delete(_channel(session, channel_id))
     session.commit()
@@ -98,7 +99,7 @@ async def channel_episodes(channel_id: int, session: Session = Depends(get_sessi
 
 
 @router.post("")
-def add_podcast(body: CreatePodcast, session: Session = Depends(get_session)):
+def add_podcast(body: CreatePodcast, session: Session = Depends(get_session), user: User = Depends(current_user)):
     try:
         url = podcast.check_url(body.audio_url)
     except PodcastError as e:
@@ -109,7 +110,7 @@ def add_podcast(body: CreatePodcast, session: Session = Depends(get_session)):
     fallback_title = Path(url.split("?")[0]).stem.replace("_", " ").replace("-", " ") or "Podcast"
     media = Media(
         kind="podcast", source_url=url, external_id=hashlib.sha1(url.encode()).hexdigest()[:11],
-        title=body.title.strip() or fallback_title, thumbnail=body.thumbnail, duration=body.duration,
+        title=body.title.strip() or fallback_title, thumbnail=body.thumbnail, duration=body.duration, added_by=user.id,
     )
     session.add(media)
     session.commit()
@@ -119,7 +120,7 @@ def add_podcast(body: CreatePodcast, session: Session = Depends(get_session)):
 
 
 @router.post("/upload")
-async def upload_podcast(file: UploadFile, title: str = Form(""), session: Session = Depends(get_session)):
+async def upload_podcast(file: UploadFile, title: str = Form(""), session: Session = Depends(get_session), user: User = Depends(current_user)):
     """An audio file from the learner's own computer."""
     name = file.filename or "audio"
     ext = Path(name).suffix.lower()
@@ -143,7 +144,7 @@ async def upload_podcast(file: UploadFile, title: str = Form(""), session: Sessi
         raise
     media = Media(
         kind="podcast", source_url=f"upload:{name}", external_id=target.stem[-11:], audio_path=str(target),
-        title=title.strip() or Path(name).stem.replace("_", " "),
+        title=title.strip() or Path(name).stem.replace("_", " "), added_by=user.id,
     )
     session.add(media)
     session.commit()

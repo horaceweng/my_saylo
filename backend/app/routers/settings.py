@@ -1,13 +1,14 @@
 import asyncio
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import engine
+from app.deps import admin_user
 from app.services import app_settings
 from app.services.app_settings import SettingError
 
-router = APIRouter(prefix="/api/settings", tags=["settings"])
+router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(admin_user)])
 
 
 class SettingsUpdate(BaseModel):

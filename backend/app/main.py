@@ -4,12 +4,15 @@ import re
 import shutil
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
+from sqlmodel import Session, select
 
 from app.config import settings
 from app.frontend import mount_frontend
 from app.db import engine, init_db
-from app.routers import ai, books, dictionary, media, news, phrases, podcasts, settings as settings_router, shadowing, tts
+from app.deps import current_user, optional_user
+from app.models import User
+from app.routers import admin, ai, auth, books, dictionary, media, news, phrases, podcasts, settings as settings_router, shadowing, tts
 from app.services import resegment, app_settings
 from app.services import pipeline
 
@@ -35,6 +38,9 @@ logging.getLogger("uvicorn.access").addFilter(_QuietPolling())
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    with Session(engine) as s:
+        if not s.exec(select(User)).first():
+            log.warning("no user exists yet: nobody can log in. Create the first admin with `uv run python scripts/create_admin.py <name>`")
     app_settings.load_overrides(engine)
     news.ensure_default_feeds()
     regraded = books.regrade_all(engine)
@@ -54,13 +60,18 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="English Lab", lifespan=lifespan)
-for r in (media.router, podcasts.router, books.router, news.router, dictionary.router, ai.router, phrases.router, shadowing.router, settings_router.router, tts.router):
-    app.include_router(r)
+app.include_router(auth.router)  # the only router open to everyone
+# Everything else needs a login; settings and admin routers ask for an admin on top (see their own dependencies).
+for r in (media.router, podcasts.router, books.router, news.router, dictionary.router, ai.router, phrases.router, shadowing.router, settings_router.router, tts.router, admin.router):
+    app.include_router(r, dependencies=[Depends(current_user)])
 
 
 @app.get("/api/health")
-async def health():
-    """What the page needs to know to say "start Ollama", "enter an API key" or "the dictionary is missing"."""
+async def health(user: User | None = Depends(optional_user)):
+    """What the page needs to know to say "start Ollama", "enter an API key" or "the dictionary is missing".
+    Without a login it only says the server is up."""
+    if not user:
+        return {"ok": True}
     cloud = settings.llm_backend == "cloud"
     models = None if cloud else await asyncio.to_thread(app_settings.installed_llm_models)
     return {

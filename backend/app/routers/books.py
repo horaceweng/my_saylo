@@ -11,7 +11,8 @@ from sqlmodel import Session, col, delete, func, select
 
 from app.config import settings
 from app.db import get_session
-from app.models import Book, Chapter, Paragraph, Setting
+from app.deps import admin_user, current_user
+from app.models import Book, Chapter, Paragraph, Setting, User
 from app.services import books, gutenberg, grading, prompts
 from app.services.books import BookError, ParsedBook
 from app.services.gutenberg import GutenbergError
@@ -42,7 +43,8 @@ def book_out(book: Book) -> dict:
 
 
 def store_book(
-    session: Session, parsed: ParsedBook, source: str, source_key: str, cover: str = "", url: str = "", published: str = "", site: str = ""
+    session: Session, parsed: ParsedBook, source: str, source_key: str, cover: str = "", url: str = "", published: str = "", site: str = "",
+    added_by: int | None = None,
 ) -> Book:
     """Grade the book and save it with its chapters and paragraphs."""
     paragraphs = [p for chapter in parsed.chapters for p in chapter.paragraphs]
@@ -50,7 +52,7 @@ def store_book(
     book = Book(
         title=parsed.title, author=parsed.author, source=source, source_key=source_key, cover=cover, level=level,
         score=score, word_count=metrics.words, paragraph_count=len(paragraphs), chapter_count=len(parsed.chapters),
-        url=url, published=published, site=site,
+        url=url, published=published, site=site, added_by=added_by,
     )
     session.add(book)
     session.flush()
@@ -112,18 +114,18 @@ async def search_gutenberg(q: str):
 
 
 @router.post("/gutenberg")
-async def add_from_gutenberg(body: GutenbergRequest, session: Session = Depends(get_session)):
+async def add_from_gutenberg(body: GutenbergRequest, session: Session = Depends(get_session), user: User = Depends(current_user)):
     key = f"gutenberg:{body.id}"
     if found := _existing(session, key):
         return book_out(found)
-    bind = session.get_bind()
+    bind, user_id = session.get_bind(), user.id
 
     def work() -> Book:
         with tempfile.TemporaryDirectory() as tmp:
             path = gutenberg.download_epub(body.id, Path(tmp))
             parsed = books.parse_epub(path)
         with Session(bind) as s:
-            return store_book(s, parsed, "gutenberg", key, gutenberg.cover_url(body.id))
+            return store_book(s, parsed, "gutenberg", key, gutenberg.cover_url(body.id), added_by=user_id)
 
     try:
         return book_out(await asyncio.to_thread(work))
@@ -132,7 +134,7 @@ async def add_from_gutenberg(body: GutenbergRequest, session: Session = Depends(
 
 
 @router.post("/upload")
-async def upload_book(file: UploadFile, session: Session = Depends(get_session)):
+async def upload_book(file: UploadFile, session: Session = Depends(get_session), user: User = Depends(current_user)):
     """An EPUB or a plain-text file from the learner's computer."""
     name = file.filename or "book"
     ext = Path(name).suffix.lower()
@@ -146,7 +148,7 @@ async def upload_book(file: UploadFile, session: Session = Depends(get_session))
     key = f"sha1:{hashlib.sha1(data).hexdigest()}"
     if found := _existing(session, key):
         return book_out(found)
-    bind = session.get_bind()
+    bind, user_id = session.get_bind(), user.id
 
     def work() -> Book:
         if ext == ".epub":
@@ -160,7 +162,7 @@ async def upload_book(file: UploadFile, session: Session = Depends(get_session))
             parsed = books.parse_text(text, fallback_title=Path(name).stem.replace("_", " "))
             source = "text"
         with Session(bind) as s:
-            return store_book(s, parsed, source, key)
+            return store_book(s, parsed, source, key, added_by=user_id)
 
     try:
         return book_out(await asyncio.to_thread(work))
@@ -216,7 +218,7 @@ def save_progress(book_id: int, body: Progress, session: Session = Depends(get_s
 
 
 @router.delete("/{book_id}")
-def delete_book(book_id: int, session: Session = Depends(get_session)):
+def delete_book(book_id: int, session: Session = Depends(get_session), _: User = Depends(admin_user)):
     _book(session, book_id)
     session.exec(delete(Paragraph).where(Paragraph.book_id == book_id))
     session.exec(delete(Chapter).where(Chapter.book_id == book_id))
