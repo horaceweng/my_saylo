@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
-import type { AdminUser, AdminUsage, CloudSummary, Invite } from '../api/types'
+import type { AdminDisk, AdminUser, AdminUsage, CloudSummary, Invite } from '../api/types'
 import { CLOUD_DISABLED_WARNING, reasonLabel } from '../lib/cloud'
 import { inviteLink } from '../lib/auth'
 import { usageLine } from '../lib/usage'
@@ -52,16 +52,21 @@ function CloudFailures({ title, data }: { title: string; data: CloudSummary }) {
   )
 }
 
+function formatGB(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+}
+
 export default function Users() {
   const { user: me } = useAuth()
   const [users, setUsers] = useState<AdminUser[]>([])
   const [invites, setInvites] = useState<Invite[]>([])
   const [overview, setOverview] = useState<AdminUsage | null>(null)
+  const [disk, setDisk] = useState<AdminDisk | null>(null)
   const [error, setError] = useState('')
 
   const load = useCallback(() => {
-    Promise.all([api.adminUsers(), api.adminInvites(), api.adminUsage()])
-      .then(([u, i, o]) => { setUsers(u); setInvites(i); setOverview(o) })
+    Promise.all([api.adminUsers(), api.adminInvites(), api.adminUsage(), api.adminDisk()])
+      .then(([u, i, o, d]) => { setUsers(u); setInvites(i); setOverview(o); setDisk(d) })
       .catch((e: Error) => setError(e.message))
   }, [])
   useEffect(load, [load])
@@ -88,6 +93,19 @@ export default function Users() {
         <p role="alert" data-cloud-warning className="rounded-xl border border-amber-400 bg-amber-50 p-4 text-sm font-medium text-amber-900 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-200">
           {CLOUD_DISABLED_WARNING}
         </p>
+      )}
+
+      {disk && (
+        <section className={box} data-disk>
+          <h2 className="mb-2 font-semibold">磁碟</h2>
+          <p className="text-sm">資料夾（data/）大小：{formatGB(disk.data_bytes)}　·　這個磁碟剩餘：{formatGB(disk.free_bytes)}</p>
+          {disk.low && (
+            <p role="alert" className="mt-2 rounded-lg border border-amber-400 bg-amber-50 p-2 text-sm font-medium text-amber-900 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-200">
+              剩餘空間低於 {formatGB(disk.min_free_bytes)}，目前所有人都不能新增影片、Podcast、音檔或書籍。
+            </p>
+          )}
+          <p className="mt-2 text-xs text-slate-500">資料夾大小每幾分鐘才重新計算一次。</p>
+        </section>
       )}
 
       {overview && (

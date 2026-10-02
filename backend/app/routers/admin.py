@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, col, select
@@ -5,7 +7,7 @@ from sqlmodel import Session, col, select
 from app.db import get_session
 from app.deps import admin_user
 from app.models import Invite, User
-from app.services import auth, cloudlog, usage
+from app.services import auth, cloudlog, disk, usage
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(admin_user)])
 
@@ -64,6 +66,12 @@ def usage_overview(session: Session = Depends(get_session)):
         "cloud": {"llm": cloudlog.summary(session, cloudlog.LLM), "stt": cloudlog.summary(session, cloudlog.STT)},
         "llm_looks_disabled": cloudlog.llm_looks_disabled(session),
     }
+
+
+@router.get("/disk")
+async def disk_overview():
+    """Size of `data/` (cached a few minutes) and the free space on its volume."""
+    return await asyncio.to_thread(disk.summary)
 
 
 def _set_disabled(user_id: int, disabled: bool, admin: User, session: Session) -> dict:

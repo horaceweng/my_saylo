@@ -325,6 +325,14 @@ export interface AdminUsage {
   resets_at: string
 }
 
+/** Size of the data folder and the free space on its volume. */
+export interface AdminDisk {
+  data_bytes: number
+  free_bytes: number
+  min_free_bytes: number
+  low: boolean
+}
+
 export interface Invite {
   code: string
   state: 'open' | 'used' | 'expired'

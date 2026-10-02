@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     max_upload_mb: int = 100
     max_media_minutes: int = 90
 
+    # New media and books are refused while the volume holding `data/` has less free space than this (GB).
+    min_free_disk_gb: float = 20
+
     # In-memory rate limits (per minute): logins/sign-ups per IP, other API calls per user.
     rate_limit_auth_per_minute: int = 10
     rate_limit_api_per_minute: int = 120

@@ -12,7 +12,7 @@ from app.db import get_session
 from app.deps import admin_user, current_user
 from app.models import Feed, Media, User
 from app.routers.media import media_out, media_stats
-from app.services import pipeline, podcast, safe_fetch, uploads, usage
+from app.services import disk, pipeline, podcast, safe_fetch, uploads, usage
 from app.services.podcast import PodcastError
 
 router = APIRouter(prefix="/api/podcasts", tags=["podcasts"])
@@ -100,6 +100,7 @@ async def channel_episodes(channel_id: int, session: Session = Depends(get_sessi
 
 @router.post("")
 def add_podcast(body: CreatePodcast, session: Session = Depends(get_session), user: User = Depends(current_user)):
+    disk.require_space()
     try:
         url = podcast.check_url(body.audio_url)
         safe_fetch.vet(url)  # refuse addresses on this machine or its networks now, not only when the download starts
@@ -124,6 +125,7 @@ def add_podcast(body: CreatePodcast, session: Session = Depends(get_session), us
 @router.post("/upload")
 async def upload_podcast(file: UploadFile, title: str = Form(""), session: Session = Depends(get_session), user: User = Depends(current_user)):
     """An audio file from the learner's own computer."""
+    disk.require_space()
     name = file.filename or "audio"  # shown as a title only; the file on disk gets a name of our own
     ext = Path(name).suffix.lower()
     if ext not in podcast.AUDIO_EXTENSIONS:

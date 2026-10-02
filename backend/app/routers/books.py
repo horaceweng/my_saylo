@@ -15,7 +15,7 @@ from app.config import settings
 from app.db import get_session
 from app.deps import admin_user, current_user
 from app.models import Book, BookProgress, Chapter, Paragraph, Setting, User
-from app.services import books, gutenberg, grading, prompts, uploads, usage
+from app.services import books, disk, gutenberg, grading, prompts, uploads, usage
 from app.services.books import BookError, ParsedBook
 from app.services.gutenberg import GutenbergError
 from app.services.llm import LLMError, make_provider
@@ -128,6 +128,7 @@ async def search_gutenberg(q: str):
 
 @router.post("/gutenberg")
 async def add_from_gutenberg(body: GutenbergRequest, session: Session = Depends(get_session), user: User = Depends(current_user)):
+    disk.require_space()
     key = f"gutenberg:{body.id}"
     if found := _existing(session, key):
         return book_out(found, progress_of(session, user.id, found.id))
@@ -149,6 +150,7 @@ async def add_from_gutenberg(body: GutenbergRequest, session: Session = Depends(
 @router.post("/upload")
 async def upload_book(file: UploadFile, session: Session = Depends(get_session), user: User = Depends(current_user)):
     """An EPUB or a plain-text file from the learner's computer."""
+    disk.require_space()
     name = file.filename or "book"  # only used to pick a title and the file type, never as a path
     ext = Path(name).suffix.lower()
     if ext not in (".epub", ".txt"):

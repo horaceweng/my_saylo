@@ -8,7 +8,7 @@ from sqlmodel import Session, delete, func, select
 from app.db import get_session
 from app.deps import admin_user, current_user
 from app.models import Media, Segment, Setting, User, Word
-from app.services import files, pipeline, usage, youtube
+from app.services import disk, files, pipeline, usage, youtube
 from app.services.grading import GRADING_VERSION, grade
 
 router = APIRouter(prefix="/api/media", tags=["media"])
@@ -81,6 +81,7 @@ def _segments(session: Session, media_id: int, from_idx: int = 0) -> list[dict]:
 
 @router.post("")
 async def create_media(body: CreateMedia, session: Session = Depends(get_session), user: User = Depends(current_user)):
+    disk.require_space()
     video_id = youtube.extract_video_id(body.url)
     if not video_id:
         raise HTTPException(400, "這不是有效的 YouTube 網址")

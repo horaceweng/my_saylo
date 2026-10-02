@@ -3,7 +3,7 @@ import { readNdjson } from './ndjson'
 import type {
   AppSettings, Health, PartialEnrichment, ReviewPhrase, ReviewQueue, WordEnrichment,
   Book, BookChapter, BookDetail, FeedItem, GutenbergResult, Media, NewsFeed, MediaDetail, MediaUpdates, PartialExplanation, PartialFeedback, RootResult, SavedPhrase, SentenceExplanation, ShadowFeedback,
-  AdminUsage, AdminUser, Invite, User,
+  AdminDisk, AdminUsage, AdminUser, Invite, User,
   PodcastChannel, PodcastLookup, PodcastShow, ShadowRecording, TtsStatus, WordResult,
 } from './types'
 
@@ -189,6 +189,7 @@ export const api = {
   adminUsers: () => request<AdminUser[]>('/admin/users'),
   setUserDisabled: (id: number, disabled: boolean) => request<{ id: number; disabled: boolean }>(`/admin/users/${id}/${disabled ? 'disable' : 'enable'}`, { method: 'POST' }),
   adminUsage: () => request<AdminUsage>('/admin/usage'),
+  adminDisk: () => request<AdminDisk>('/admin/disk'),
   adminInvites: () => request<Invite[]>('/admin/invites'),
   createInvite: (days = 7) => request<Invite>('/admin/invites', post({ days })),
   listMedia: (kind?: 'video' | 'podcast') => request<Media[]>(`/media${kind ? `?kind=${kind}` : ''}`),

@@ -8,7 +8,7 @@ from app.config import settings
 from app.db import get_session
 from app.main import app
 from app.models import User
-from app.services import auth, compute, llm, ratelimit, safe_fetch, transcribe, uploads
+from app.services import auth, compute, disk, llm, ratelimit, safe_fetch, transcribe, uploads
 
 
 class FakeLLM:
@@ -33,6 +33,8 @@ def isolated_state(monkeypatch):
     SQLModel.metadata.create_all(engine)
     monkeypatch.setattr(db, "engine", engine)
     ratelimit.reset()
+    disk.reset_cache()
+    monkeypatch.setattr(disk, "free_bytes", lambda: 500 * disk.GB)  # tests of the disk guard replace this
     llm.cloud_cooldown.reset()
     transcribe.cloud_cooldown.reset()
     compute.heavy._last_kind = None
