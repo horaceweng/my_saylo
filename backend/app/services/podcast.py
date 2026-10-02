@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import feedparser
 import httpx
 
-from app.services import safe_fetch
+from app.services import safe_fetch, uploads
 
 AUDIO_EXTENSIONS = (".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga", ".opus", ".flac", ".mp4")
 MAX_FEED_BYTES = 8 * 1024 * 1024
@@ -152,6 +152,18 @@ def audio_filename(url: str, content_type: str = "") -> str:
     return f"podcast_{digest}{ext}"
 
 
+def _check_audio(path: Path) -> None:
+    """Whatever a server sent must really be audio before ffmpeg opens it (a text "playlist" can point ffmpeg at other files and addresses)."""
+    with path.open("rb") as f:
+        head = f.read(16)
+    if uploads.audio_container(head) is None:
+        raise PodcastError("下載到的不是音檔")
+    try:
+        uploads.probe_audio(path)
+    except ValueError as e:
+        raise PodcastError("下載到的不是可用的音檔") from e
+
+
 def download_audio(url: str, dest_dir: Path, progress=None, client: httpx.Client | None = None) -> Path:
     """Download an episode. Returns the file (an earlier download of the same link is reused).
     `progress(fraction)` is called now and then when the size is known."""
@@ -185,6 +197,7 @@ def download_audio(url: str, dest_dir: Path, progress=None, client: httpx.Client
                         progress(last_reported)
             if written == 0:
                 raise PodcastError("下載到的檔案是空的")
+            _check_audio(partial)
             partial.replace(target)
             partial = None
             return target

@@ -94,7 +94,7 @@ def test_network_problems_become_readable_errors():
 
 
 def test_download_saves_the_file_reports_progress_and_is_reused(tmp_path):
-    data = b"x" * 300_000
+    data = b"ID3" + b"x" * 300_000
     calls = []
 
     def handler(request):
@@ -112,7 +112,7 @@ def test_download_saves_the_file_reports_progress_and_is_reused(tmp_path):
 
 
 def test_download_picks_the_extension_from_the_content_type_when_the_link_has_none(tmp_path):
-    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, headers={"content-type": "audio/mp4"}, content=b"abc")))
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, headers={"content-type": "audio/mp4"}, content=b"ID3abc")))
     assert podcast.download_audio("https://a.com/download?id=7", tmp_path, client=client).suffix == ".m4a"
 
 
@@ -139,4 +139,12 @@ def test_files_too_large_are_refused_before_downloading(tmp_path, monkeypatch):
     client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, headers={"content-length": "5000"}, content=b"x" * 5000)))
     with pytest.raises(PodcastError, match="太大"):
         podcast.download_audio("https://a.com/big.mp3", tmp_path, client=client)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_download_that_is_not_audio_is_refused_and_removed(tmp_path):
+    playlist = b"#EXTM3U\n#EXTINF:1,\nfile:///etc/passwd\n"  # ffmpeg would follow this to a local file
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, headers={"content-type": "audio/mpeg"}, content=playlist)))
+    with pytest.raises(PodcastError, match="不是音檔"):
+        podcast.download_audio("https://a.com/ep.mp3", tmp_path, client=client)
     assert list(tmp_path.iterdir()) == []

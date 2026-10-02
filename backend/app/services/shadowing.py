@@ -99,14 +99,15 @@ def _ffmpeg(args: list[str]) -> None:
         raise AudioError(proc.stderr.strip()[-300:] or "ffmpeg failed")
 
 
-def to_wav16k(src: Path, dst: Path) -> None:
-    """Whatever the browser recorded (webm/opus, mp4) → 16 kHz mono wav, which speech recognition expects."""
-    _ffmpeg(["-i", str(src), "-ac", "1", "-ar", "16000", str(dst)])
+def to_wav16k(src: Path, dst: Path, max_seconds: int = 150) -> None:
+    """Whatever the browser recorded (webm/opus, mp4) → 16 kHz mono wav, which speech recognition expects.
+    Only the first `max_seconds` are converted, so a small file that unpacks to hours cannot fill the disk."""
+    _ffmpeg(["-protocol_whitelist", "file,pipe", "-i", str(src), "-t", str(max_seconds), "-ac", "1", "-ar", "16000", str(dst)])
 
 
 def extract_clip(audio: Path, start: float, end: float, dst: Path) -> None:
     """The part of a video's audio that holds one sentence, with a little room on both sides."""
-    _ffmpeg(["-ss", f"{max(0.0, start - 0.15):.3f}", "-to", f"{end + 0.15:.3f}", "-i", str(audio), "-ac", "1", "-ar", "22050", str(dst)])
+    _ffmpeg(["-protocol_whitelist", "file,pipe", "-ss", f"{max(0.0, start - 0.15):.3f}", "-to", f"{end + 0.15:.3f}", "-i", str(audio), "-ac", "1", "-ar", "22050", str(dst)])
 
 
 def wav_stats(path: Path) -> tuple[float, float]:

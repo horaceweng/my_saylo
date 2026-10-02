@@ -12,7 +12,7 @@ from app.db import get_session
 from app.deps import admin_user, current_user
 from app.models import Feed, Media, User
 from app.routers.media import media_out, media_stats
-from app.services import pipeline, podcast, safe_fetch, usage
+from app.services import pipeline, podcast, safe_fetch, uploads, usage
 from app.services.podcast import PodcastError
 
 router = APIRouter(prefix="/api/podcasts", tags=["podcasts"])
@@ -23,8 +23,8 @@ MAX_UPLOAD_BYTES = 600 * 1024 * 1024
 class CreatePodcast(BaseModel):
     audio_url: str
     title: str = Field(default="", max_length=300)
-    thumbnail: str = ""
-    duration: float = 0.0
+    thumbnail: str = Field(default="", max_length=1000)
+    duration: float = Field(default=0.0, ge=0, le=86400)
 
 
 @router.get("/feed")
@@ -124,30 +124,24 @@ def add_podcast(body: CreatePodcast, session: Session = Depends(get_session), us
 @router.post("/upload")
 async def upload_podcast(file: UploadFile, title: str = Form(""), session: Session = Depends(get_session), user: User = Depends(current_user)):
     """An audio file from the learner's own computer."""
-    name = file.filename or "audio"
+    name = file.filename or "audio"  # shown as a title only; the file on disk gets a name of our own
     ext = Path(name).suffix.lower()
     if ext not in podcast.AUDIO_EXTENSIONS:
         raise HTTPException(400, "請選擇音檔（mp3、m4a、wav、ogg、flac 等）")
     folder = settings.data_dir / "audio"
     folder.mkdir(parents=True, exist_ok=True)
     target = folder / f"upload_{uuid.uuid4().hex[:16]}{ext}"
-    written, limit = 0, usage.upload_limit_bytes(user, MAX_UPLOAD_BYTES)
+    limit = usage.upload_limit_bytes(user, MAX_UPLOAD_BYTES)
+    await uploads.save_stream(file, target, limit, f"音檔太大（超過 {limit // (1024 * 1024)} MB）")
     try:
-        with target.open("wb") as out:
-            while chunk := await file.read(1 << 20):
-                written += len(chunk)
-                if written > limit:
-                    raise HTTPException(413, f"音檔太大（超過 {limit // (1024 * 1024)} MB）")
-                out.write(chunk)
-        if written == 0:
-            raise HTTPException(400, "檔案是空的")
+        usage.check_media_length(user, await asyncio.to_thread(uploads.check_audio_file, target))
         usage.charge_media(session, user)  # its length is counted once the audio has been read (pipeline)
     except BaseException:
         target.unlink(missing_ok=True)
         raise
     media = Media(
-        kind="podcast", source_url=f"upload:{name}", external_id=target.stem[-11:], audio_path=str(target),
-        title=title.strip() or Path(name).stem.replace("_", " "), added_by=user.id,
+        kind="podcast", source_url=f"upload:{name[:200]}", external_id=target.stem[-11:], audio_path=str(target),
+        title=(title.strip() or Path(name).stem.replace("_", " "))[:300], added_by=user.id,
     )
     session.add(media)
     session.commit()

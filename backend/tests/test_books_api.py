@@ -59,7 +59,7 @@ def test_bad_uploads_are_refused_with_a_reason_and_leave_nothing_behind(env):
     assert upload(client, "notes.pdf", b"x").status_code == 400
     assert upload(client, "empty.txt", b"").status_code == 400
     res = upload(client, "broken.epub", b"this is not an epub")
-    assert res.status_code == 400 and "無法讀取" in res.json()["detail"]
+    assert res.status_code == 400 and "EPUB" in res.json()["detail"]
     assert upload(client, "blank.txt", b"   \n\n  ").status_code == 400
     assert client.get("/api/books").json() == []
 

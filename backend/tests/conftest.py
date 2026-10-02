@@ -8,7 +8,7 @@ from app.config import settings
 from app.db import get_session
 from app.main import app
 from app.models import User
-from app.services import auth, compute, llm, ratelimit, safe_fetch, transcribe
+from app.services import auth, compute, llm, ratelimit, safe_fetch, transcribe, uploads
 
 
 class FakeLLM:
@@ -38,6 +38,7 @@ def isolated_state(monkeypatch):
     compute.heavy._last_kind = None
     monkeypatch.setattr(llm, "_loaded", set())
     # No test needs the network: every name "resolves" to a public address (tests of the guard replace this).
+    monkeypatch.setattr(uploads, "probe_audio", lambda path: 60.0)  # ffprobe is tested on a real file in test_uploads
     monkeypatch.setattr(safe_fetch, "resolve", lambda host, port: ["93.184.216.34"])
 
 

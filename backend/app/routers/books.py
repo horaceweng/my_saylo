@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import tempfile
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -13,7 +14,7 @@ from app.config import settings
 from app.db import get_session
 from app.deps import admin_user, current_user
 from app.models import Book, Chapter, Paragraph, Setting, User
-from app.services import books, gutenberg, grading, prompts, usage
+from app.services import books, gutenberg, grading, prompts, uploads, usage
 from app.services.books import BookError, ParsedBook
 from app.services.gutenberg import GutenbergError
 from app.services.llm import LLMError, make_provider
@@ -136,38 +137,42 @@ async def add_from_gutenberg(body: GutenbergRequest, session: Session = Depends(
 @router.post("/upload")
 async def upload_book(file: UploadFile, session: Session = Depends(get_session), user: User = Depends(current_user)):
     """An EPUB or a plain-text file from the learner's computer."""
-    name = file.filename or "book"
+    name = file.filename or "book"  # only used to pick a title and the file type, never as a path
     ext = Path(name).suffix.lower()
     if ext not in (".epub", ".txt"):
         raise HTTPException(400, "請選擇 EPUB 或 txt 檔案")
-    data = await file.read(MAX_UPLOAD_BYTES + 1)
-    if not data:
-        raise HTTPException(400, "檔案是空的")
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, "檔案太大（超過 60 MB）")
-    key = f"sha1:{hashlib.sha1(data).hexdigest()}"
-    if found := _existing(session, key):
-        return book_out(found)
-    bind, user_id = session.get_bind(), user.id
-
-    def work() -> Book:
-        if ext == ".epub":
-            with tempfile.NamedTemporaryFile(suffix=".epub", dir=settings.data_dir) as tmp:
-                tmp.write(data)
-                tmp.flush()
-                parsed = books.parse_epub(Path(tmp.name))
-            source = "epub"
-        else:
-            text = data.decode("utf-8-sig", errors="replace")
-            parsed = books.parse_text(text, fallback_title=Path(name).stem.replace("_", " "))
-            source = "text"
-        with Session(bind) as s:
-            return store_book(s, parsed, source, key, added_by=user_id)
-
+    limit = usage.upload_limit_bytes(user, MAX_UPLOAD_BYTES)
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    tmp = settings.data_dir / f"upload_{uuid.uuid4().hex}.tmp"
+    _, digest = await uploads.save_stream(file, tmp, limit, f"檔案太大（超過 {limit // (1024 * 1024)} MB）")
     try:
-        return book_out(await asyncio.to_thread(work))
-    except BookError as e:
-        raise HTTPException(400, str(e)) from e
+        with tmp.open("rb") as f:
+            head = f.read(4096)
+        if ext == ".epub":
+            uploads.check_epub(tmp)
+        elif not uploads.looks_like_text(head):
+            raise HTTPException(400, "這不是文字檔")
+        key = f"sha1:{digest}"
+        if found := _existing(session, key):
+            return book_out(found)
+        bind, user_id = session.get_bind(), user.id
+
+        def work() -> Book:
+            if ext == ".epub":
+                parsed = books.parse_epub(tmp)
+                source = "epub"
+            else:
+                parsed = books.parse_text(tmp.read_bytes().decode("utf-8-sig", errors="replace"), fallback_title=Path(name).stem.replace("_", " ")[:200])
+                source = "text"
+            with Session(bind) as s:
+                return store_book(s, parsed, source, key, added_by=user_id)
+
+        try:
+            return book_out(await asyncio.to_thread(work))
+        except BookError as e:
+            raise HTTPException(400, str(e)) from e
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _book(session: Session, book_id: int) -> Book:

@@ -12,7 +12,7 @@ from app.config import settings
 from app.db import get_session
 from app.deps import current_user
 from app.models import Media, Recording, Segment, User
-from app.services import prompts, shadowing, usage
+from app.services import prompts, shadowing, uploads, usage
 from app.services.llm import LLMError, chat_json, make_provider
 from app.services.partial_json import parse_partial
 
@@ -69,17 +69,14 @@ def sentence_audio(segment_id: int, session: Session = Depends(get_session)):
 async def upload_recording(segment_id: int, file: UploadFile, session: Session = Depends(get_session), user: User = Depends(current_user)):
     """Take a recording of the learner, recognise it and compare it word by word with the sentence."""
     seg = _segment(session, segment_id)
-    data = await file.read(MAX_UPLOAD_BYTES + 1)
-    if not data:
-        raise HTTPException(400, "沒有收到錄音")
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, "錄音檔太大")
-
     folder = _dir(f"recordings/{user.id}")  # one folder per learner; older files stay where the database says
-    token = uuid.uuid4().hex
+    token = uuid.uuid4().hex  # the file name is ours; whatever the browser called the file is ignored
     raw, wav = folder / f"{token}.upload", folder / f"{token}.wav"
+    await uploads.save_stream(file, raw, MAX_UPLOAD_BYTES, "錄音檔太大", empty="沒有收到錄音")
     try:
-        raw.write_bytes(data)
+        with raw.open("rb") as f:
+            if uploads.audio_container(f.read(16)) is None:
+                raise HTTPException(400, "無法讀取這段錄音：這不是音訊檔")
         try:
             await asyncio.to_thread(shadowing.to_wav16k, raw, wav)
             duration, loudness = shadowing.wav_stats(wav)

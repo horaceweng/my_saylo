@@ -139,7 +139,7 @@ def test_the_upload_size_limit_applies_to_users_only(user_client, client, monkey
     monkeypatch.setattr(settings, "data_dir", tmp_path)
     monkeypatch.setattr("app.routers.podcasts.pipeline.enqueue", lambda media_id: None)
     monkeypatch.setattr(settings, "max_upload_mb", 1)
-    big = b"\0" * (2 * 1024 * 1024)
+    big = b"ID3" + b"\0" * (2 * 1024 * 1024)
     res = user_client.post("/api/podcasts/upload", files={"file": ("a.mp3", big)})
     assert res.status_code == 413 and "1 MB" in res.json()["detail"]
     assert not list((tmp_path / "audio").glob("upload_*"))  # nothing left behind
