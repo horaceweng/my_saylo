@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     llm_model: str = "qwen3:8b"
     whisper_model: str = "mlx-community/whisper-large-v3-turbo"
     data_dir: Path = BASE_DIR / "data"
+    # The login cookie is only sent over https. Plain-http local use (scripts/start.sh) turns this off.
+    cookie_secure: bool = True
+    session_days: int = 30
+    invite_days: int = 7
 
     # Where the AI work is done: on this Mac (ollama / local mlx-whisper) or by a cloud service that speaks the
     # OpenAI API (Gemini, OpenAI, Groq, OpenRouter …). Changed on the settings page.

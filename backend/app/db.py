@@ -28,6 +28,13 @@ _LATER_COLUMNS = [
     ("savedphrase", "ease", "FLOAT NOT NULL DEFAULT 2.5", None),
     ("savedphrase", "reps", "INTEGER NOT NULL DEFAULT 0", None),
     ("savedphrase", "lapses", "INTEGER NOT NULL DEFAULT 0", None),
+    # Owners: NULL until scripts/create_admin.py gives the existing rows to the first admin (none exists yet when
+    # the column is added). Queries filter by user_id strictly, so ownerless rows are invisible until then.
+    ("savedphrase", "user_id", "INTEGER", None),
+    ("recording", "user_id", "INTEGER", None),
+    ("media", "added_by", "INTEGER", None),
+    ("book", "added_by", "INTEGER", None),
+    ("feed", "added_by", "INTEGER", None),
 ]
 
 

@@ -22,6 +22,7 @@ class Media(SQLModel, table=True):
     transcribed: bool = False  # every part of the audio has been turned into sentences
     level: str = ""  # estimated difficulty (A2/B1/B2/C1+), set once the transcript is ready
     score: float = 0.0
+    added_by: int | None = Field(default=None, foreign_key="user.id")  # who imported it; for quotas, not for visibility
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -54,6 +55,7 @@ class SavedPhrase(SQLModel, table=True):
     source_kind: str = "video"
     source_id: int | None = None
     timestamp: float = 0
+    user_id: int | None = Field(default=None, index=True)  # NULL only until create_admin.py hands old rows to the first admin
     created_at: datetime = Field(default_factory=_now)
     # spaced review (see services/srs.py)
     due_at: datetime = Field(default_factory=_now, index=True)
@@ -81,6 +83,7 @@ class Recording(SQLModel, table=True):
     score: int = 0  # percentage of the sentence's words that were spoken
     diff_json: str = "[]"  # word-by-word comparison, see services/shadowing.py
     feedback_json: str = ""  # the AI's comments, filled in on request
+    user_id: int | None = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -101,6 +104,7 @@ class Book(SQLModel, table=True):
     site: str = ""  # "BBC News", "VOA Learning English" …
     last_chapter: int = 0  # reading position: chapter index …
     last_paragraph: int = 0  # … and the paragraph's index within the whole book
+    added_by: int | None = Field(default=None, foreign_key="user.id")
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -130,9 +134,37 @@ class Feed(SQLModel, table=True):
     url: str = Field(index=True)
     title: str
     image: str = ""
+    added_by: int | None = Field(default=None, foreign_key="user.id")
     created_at: datetime = Field(default_factory=_now)
 
 
 class Setting(SQLModel, table=True):
     key: str = Field(primary_key=True)
     value: str = ""
+
+
+class User(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(unique=True, index=True)  # stored lower-case
+    password_hash: str
+    is_admin: bool = False
+    disabled: bool = False
+    created_at: datetime = Field(default_factory=_now)
+
+
+class Invite(SQLModel, table=True):
+    code: str = Field(primary_key=True)
+    created_by: int = Field(foreign_key="user.id")
+    used_by: int | None = Field(default=None, foreign_key="user.id")
+    created_at: datetime = Field(default_factory=_now)
+    expires_at: datetime
+
+
+class AuthSession(SQLModel, table=True):
+    """A login. Only the sha256 of the cookie's token is kept, so a copy of the database cannot be used to log in."""
+
+    token_hash: str = Field(primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    created_at: datetime = Field(default_factory=_now)
+    expires_at: datetime
+    last_seen: datetime = Field(default_factory=_now)
