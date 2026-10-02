@@ -36,6 +36,7 @@ def isolated_state(monkeypatch):
     llm.cloud_cooldown.reset()
     transcribe.cloud_cooldown.reset()
     compute.heavy._last_kind = None
+    monkeypatch.setattr(llm, "_loaded", set())
 
 
 @pytest.fixture

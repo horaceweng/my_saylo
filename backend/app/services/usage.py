@@ -72,7 +72,7 @@ def _too_many(what: str, used: float, limit: float, unit: str) -> HTTPException:
     reset = next_reset()
     local = reset.astimezone(_zone())
     seconds = max(1, int((reset - datetime.now(timezone.utc)).total_seconds()))
-    message = f"今天的{what}已達上限（{used:g}／{limit:g} {unit}）。將在 {local:%m/%d %H:%M}（{_zone_label()}）重置，之後就可以再用。"
+    message = f"{what}已達上限（{used:g}／{limit:g} {unit}）。將在 {local:%m/%d %H:%M}（{_zone_label()}）重置，之後就可以再用。"
     return HTTPException(429, message, headers={"Retry-After": str(seconds)})
 
 
@@ -82,7 +82,7 @@ def charge_ai(session: Session, user: User) -> None:
         return
     used = used_today(session, user.id, AI)
     if used + 1 > settings.quota_ai_requests_per_day:
-        raise _too_many("AI 使用次數", used, settings.quota_ai_requests_per_day, "次")
+        raise _too_many("今天的 AI 使用次數", used, settings.quota_ai_requests_per_day, "次")
     record(session, user.id, AI)
 
 
@@ -98,11 +98,11 @@ def charge_media(session: Session, user: User, seconds: float = 0.0) -> None:
     check_media_length(user, seconds)
     count = used_today(session, user.id, MEDIA)
     if count + 1 > settings.quota_media_per_day:
-        raise _too_many("新增影片／Podcast 數量", count, settings.quota_media_per_day, "支")
+        raise _too_many("今天新增的影片／Podcast 數量", count, settings.quota_media_per_day, "支")
     minutes = seconds / 60
     used = used_today(session, user.id, AUDIO_MINUTES)
     if used + minutes > settings.quota_audio_minutes_per_day:
-        raise _too_many("處理的音訊長度", round(used), settings.quota_audio_minutes_per_day, "分鐘")
+        raise _too_many("今天處理的音訊長度", round(used), settings.quota_audio_minutes_per_day, "分鐘")
     record(session, user.id, MEDIA)
     if minutes:
         record(session, user.id, AUDIO_MINUTES, minutes)

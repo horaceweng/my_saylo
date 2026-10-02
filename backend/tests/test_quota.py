@@ -107,7 +107,7 @@ def test_new_media_per_day_is_limited(user_client, videos, monkeypatch):
     assert user_client.post("/api/media", json={"url": vid(1)}).status_code == 200
     assert user_client.post("/api/media", json={"url": vid(2)}).status_code == 200
     res = user_client.post("/api/media", json={"url": vid(3)})
-    assert res.status_code == 429 and "新增影片" in res.json()["detail"] and "台北時間" in res.json()["detail"]
+    assert res.status_code == 429 and "新增的影片" in res.json()["detail"] and "台北時間" in res.json()["detail"]
     assert len(videos) == 2
     # a video somebody already added is just opened: it costs nothing
     assert user_client.post("/api/media", json={"url": vid(1)}).status_code == 200

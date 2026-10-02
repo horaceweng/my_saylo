@@ -51,16 +51,16 @@ OpenCode Zen 免費模型的注意事項（2026-10 查證）：免費模型是�
 
 ## Phase 2 — 運算佇列、模型路由、配額（程式，Sonnet）
 
-- [ ] 2.1 全域「本地重運算鎖」：本地 whisper、Ollama、本地 TTS、shadowing 的本地 STT 同時只跑一個（`threading.Semaphore(1)`，async 端用 `asyncio.to_thread` 取鎖）。先盤點所有呼叫點：`transcribe.py`、`llm.py`（Ollama provider）、`tts.py`、`shadowing.py`、`pipeline.py`、`explain_queue.py`。雲端呼叫不吃這把鎖
-- [ ] 2.1b 換模型前先釋放：要跑本地 whisper／TTS 前，先請 Ollama 卸載模型（`POST /api/generate {"model":…, "keep_alive":0}`）；whisper 用完也釋放（mlx 清快取）。Ollama 請求一律帶較短的 `keep_alive`（例如 60s），不要讓 5.6 GB 一直佔著（依 0.1 的實測結果）
-- [ ] 2.2 LLM 路由：`llm.py` 新增「主要 = cloud（OpenCode Zen）、失敗（連線錯誤、429、5xx、逾時、JSON 解析連續失敗）→ 本地 Ollama」的 fallback provider；設定頁加「失敗時改用本地模型」開關。AI 快取 key 已含模型名，不用改
-- [ ] 2.3 STT 路由：同樣做 cloud（Groq）→ 本地 mlx-whisper 的 fallback
-- [ ] 2.4 排隊狀態：影片處理佇列回報「排隊中，前面 N 個」；句子說明在等鎖時送一個 `{"type":"queued","position":N}` 事件；前端顯示，而不是空轉
-- [ ] 2.5 逾時：單一 LLM 請求 120 秒、單支媒體處理總時長上限（例如音訊長度 × 3 + 10 分鐘），逾時標記失敗並可重試
-- [ ] 2.6 `UsageEvent(id, user_id, kind, amount, created_at)` + 配額檢查（預設值放 `config.py`，Phase 0 後調整）：每日新增媒體 5 支、每日音訊 90 分鐘、每日 AI 請求 300 次、單檔上傳 100 MB、單支媒體最長 90 分鐘。超過回 429 + 中文說明；管理員不受限；AI 快取命中不計次
-- [ ] 2.7 簡單速率限制（in-memory）：登入/註冊每 IP 每分鐘 10 次；一般 API 每使用者每分鐘 120 次。注意 Funnel 進來的真實 IP 在 `X-Forwarded-For`，只在來源是 127.0.0.1 時信任這個 header
-- [ ] 2.8 管理員「使用者」頁顯示每人今日用量
-- [ ] 2.9 測試：fallback（mock provider 丟 429 → 改用本地）、配額邊界、鎖的互斥（兩個工作不重疊）、速率限制
+- [x] 2.1 全域「本地重運算鎖」：本地 whisper、Ollama、本地 TTS、shadowing 的本地 STT 同時只跑一個（`threading.Semaphore(1)`，async 端用 `asyncio.to_thread` 取鎖）。先盤點所有呼叫點：`transcribe.py`、`llm.py`（Ollama provider）、`tts.py`、`shadowing.py`、`pipeline.py`、`explain_queue.py`。雲端呼叫不吃這把鎖
+- [x] 2.1b 換模型前先釋放：要跑本地 whisper／TTS 前，先請 Ollama 卸載模型（`POST /api/generate {"model":…, "keep_alive":0}`）；whisper 用完也釋放（mlx 清快取）。Ollama 請求一律帶較短的 `keep_alive`（例如 60s），不要讓 5.6 GB 一直佔著（依 0.1 的實測結果）
+- [x] 2.2 LLM 路由：`llm.py` 新增「主要 = cloud（OpenCode Zen）、失敗（連線錯誤、429、5xx、逾時、JSON 解析連續失敗）→ 本地 Ollama」的 fallback provider；設定頁加「失敗時改用本地模型」開關。AI 快取 key 已含模型名，不用改
+- [x] 2.3 STT 路由：同樣做 cloud（Groq）→ 本地 mlx-whisper 的 fallback
+- [x] 2.4 排隊狀態：影片處理佇列回報「排隊中，前面 N 個」；句子說明在等鎖時送一個 `{"type":"queued","position":N}` 事件；前端顯示，而不是空轉
+- [x] 2.5 逾時：單一 LLM 請求 120 秒、單支媒體處理總時長上限（例如音訊長度 × 3 + 10 分鐘），逾時標記失敗並可重試
+- [x] 2.6 `UsageEvent(id, user_id, kind, amount, created_at)` + 配額檢查（預設值放 `config.py`，Phase 0 後調整）：每日新增媒體 5 支、每日音訊 90 分鐘、每日 AI 請求 300 次、單檔上傳 100 MB、單支媒體最長 90 分鐘。超過回 429 + 中文說明；管理員不受限；AI 快取命中不計次
+- [x] 2.7 簡單速率限制（in-memory）：登入/註冊每 IP 每分鐘 10 次；一般 API 每使用者每分鐘 120 次。注意 Funnel 進來的真實 IP 在 `X-Forwarded-For`，只在來源是 127.0.0.1 時信任這個 header
+- [x] 2.8 管理員「使用者」頁顯示每人今日用量
+- [x] 2.9 測試：fallback（mock provider 丟 429 → 改用本地）、配額邊界、鎖的互斥（兩個工作不重疊）、速率限制
 
 驗證：pytest 全過；本機開兩個帳號同時送轉錄 + 句子說明，畫面出現排隊狀態、`top` 只看到一個重運算在跑。
 
