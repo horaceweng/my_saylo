@@ -12,10 +12,10 @@ router = APIRouter(prefix="/api/phrases", tags=["phrases"])
 
 class PhraseIn(BaseModel):
     text: str = Field(min_length=1, max_length=600)
-    context_sentence: str = ""
-    translation: str = ""
-    note: str = ""
-    source_kind: str = "video"
+    context_sentence: str = Field(default="", max_length=2000)
+    translation: str = Field(default="", max_length=2000)
+    note: str = Field(default="", max_length=5000)
+    source_kind: str = Field(default="video", max_length=20)
     source_id: int | None = None
     timestamp: float = 0
 

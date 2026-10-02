@@ -44,9 +44,7 @@ def isolated_state(monkeypatch):
 
 @pytest.fixture
 def session():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    SQLModel.metadata.create_all(engine)
-    with Session(engine) as s:
+    with Session(db.engine) as s:  # the same database the middleware and background code reach through `db.engine`
         yield s
 
 

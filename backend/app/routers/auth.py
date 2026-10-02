@@ -33,6 +33,8 @@ def _set_cookie(response: Response, token: str) -> None:
 
 @router.post("/login", dependencies=[Depends(ratelimit.limit_auth)])
 def login(body: LoginIn, response: Response, session: Session = Depends(get_session)):
+    # Per account as well as per address: guessing one password from many addresses is slowed down too.
+    ratelimit.hit(f"login:{body.username.strip().lower()}", settings.rate_limit_auth_per_minute, "登入嘗試")
     try:
         user = auth.authenticate(session, body.username, body.password)
     except auth.AuthError as e:

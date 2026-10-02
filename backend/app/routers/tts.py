@@ -1,10 +1,14 @@
 import asyncio
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlmodel import Session
 
-from app.services import tts
+from app.db import get_session
+from app.deps import current_user
+from app.models import User
+from app.services import tts, usage
 from app.services.tts import TTSError
 
 router = APIRouter(prefix="/api/tts", tags=["tts"])
@@ -29,8 +33,11 @@ def status():
 
 
 @router.post("/speak")
-async def speak(body: SpeakIn):
+async def speak(body: SpeakIn, user: User = Depends(current_user), session: Session = Depends(get_session)):
     """The spoken audio (mp3) of a short text. The same text and voice is only ever made once."""
+    text = tts.normalize(body.text)
+    if text and tts.speakable(text) and any(v.id == body.voice for v in tts.VOICES) and not tts.cache_path(text, body.voice).exists():
+        usage.charge_ai(session, user)  # making new speech takes this Mac's one heavy slot, like an AI question
     try:
         path = await asyncio.to_thread(tts.speak_file, body.text, body.voice)
     except TTSError as e:

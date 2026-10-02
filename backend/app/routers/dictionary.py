@@ -2,7 +2,7 @@ import json
 import re
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session
@@ -41,7 +41,7 @@ _WORD_RE = re.compile(r"^[a-zA-Z][a-zA-Z'-]{0,40}$")
 
 
 @router.get("/root/{root}")
-async def words_with_root(root: str, meaning: str = "", session: Session = Depends(get_session), user: User = Depends(current_user)):
+async def words_with_root(root: str, meaning: str = Query("", max_length=100), session: Session = Depends(get_session), user: User = Depends(current_user)):
     """Words sharing a root. The LLM proposes them, ECDICT filters out invented ones."""
     root = root.strip().lower()
     if not _WORD_RE.match(root):

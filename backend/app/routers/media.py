@@ -159,12 +159,17 @@ def set_focus(media_id: int, body: Focus):
 
 
 @router.post("/{media_id}/retry")
-def retry_media(media_id: int, restart: bool = False, session: Session = Depends(get_session)):
+def retry_media(media_id: int, restart: bool = False, session: Session = Depends(get_session), user: User = Depends(current_user)):
     """Continue an interrupted or failed job from where it stopped. `restart=true` throws away the
     transcript and translations and does everything again."""
     media = session.get(Media, media_id)
     if not media:
         raise HTTPException(404, "找不到這個影片")
+    # Shared content: starting over wipes everyone's transcript, and every retry of a long job can cost cloud money again.
+    if restart and not user.is_admin:
+        raise HTTPException(403, "只有管理員可以重新處理整支影片")
+    if not user.is_admin and media.status != "error":
+        return media_out(media, media_stats(session, [media_id]).get(media_id))  # it is waiting or running already
     if restart:
         seg_ids = session.exec(select(Segment.id).where(Segment.media_id == media_id)).all()
         if seg_ids:
