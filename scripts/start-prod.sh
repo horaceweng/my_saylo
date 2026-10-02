@@ -4,6 +4,12 @@
 # address in X-Forwarded-For. The login cookie stays Secure (https from the Funnel), unlike start.sh.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Under launchd the PATH is minimal: make sure Homebrew (node, ffmpeg, uv) and uv's own installer folder are on it.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+if ! command -v uv >/dev/null 2>&1; then
+  echo "找不到 uv（已找過 ~/.local/bin 與 /opt/homebrew/bin）" >&2
+  exit 1
+fi
 
 if ! curl -s -m 2 http://localhost:11434/api/tags >/dev/null; then
   echo "⚠️  Ollama 沒有在執行：翻譯與 AI 功能暫時無法使用（另開終端機執行 ollama serve）"
@@ -14,10 +20,12 @@ if [ ! -e /opt/homebrew/lib/libespeak-ng.dylib ] && [ ! -e /usr/local/lib/libesp
 fi
 
 cd "$ROOT/frontend"
-[ -d node_modules ] || npm install
+# No terminal under launchd: never wait for input (stdin from /dev/null, no prompts, no progress bars).
+export CI=true
+[ -d node_modules ] || npm install --no-audit --no-fund </dev/null
 if [ ! -f dist/index.html ] || [ -n "$(find src index.html package.json -newer dist/index.html -print -quit)" ]; then
   echo "建置前端…"
-  npm run build
+  npm run build </dev/null
 fi
 
 cd "$ROOT/backend"
