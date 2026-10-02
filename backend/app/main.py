@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import shutil
 from contextlib import asynccontextmanager
 
@@ -13,6 +14,22 @@ from app.services import resegment, app_settings
 from app.services import pipeline
 
 log = logging.getLogger("uvicorn.error")
+
+# The page asks these on a timer (health every 15 s, media lists/updates every few seconds while a job runs), so
+# their successful requests would bury everything else in the terminal. Failures still show.
+_POLLED = re.compile(r"^/api/(health|media(\?.*)?|media/\d+/updates(\?.*)?)$")
+
+
+class _QuietPolling(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not isinstance(args, tuple) or len(args) != 5:
+            return True
+        _client, method, path, _version, status = args
+        return not (method == "GET" and isinstance(status, int) and status < 300 and _POLLED.match(str(path)))
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietPolling())
 
 
 @asynccontextmanager
