@@ -9,16 +9,6 @@ import { LEVELS, countByLevel, filterByLevel } from '../lib/books'
 import { formatDuration } from '../lib/mediaStatus'
 
 const EPISODES_SHOWN = 20
-const CHANNEL_KEY = 'podcast-channel'
-
-function rememberedChannel(): number | null {
-  try {
-    const n = Number(localStorage.getItem(CHANNEL_KEY))
-    return Number.isInteger(n) && n > 0 ? n : null
-  } catch {
-    return null
-  }
-}
 
 export default function Library() {
   const [params, setParams] = useSearchParams()
@@ -52,7 +42,7 @@ function PodcastTab() {
   const [looking, setLooking] = useState(false)
   const [result, setResult] = useState<PodcastLookup | null>(null)
   const [channels, setChannels] = useState<PodcastChannel[] | null>(null)
-  const [channelId, setChannelId] = useState<number | null>(rememberedChannel)
+  const [channelId, setChannelId] = useState<number | null>(null)
   const [channelShow, setChannelShow] = useState<PodcastShow | null>(null)
   const [loadingChannel, setLoadingChannel] = useState(false)
   const [following, setFollowing] = useState(false)
@@ -73,16 +63,9 @@ function PodcastTab() {
     api.listChannels().then(setChannels).catch((e: Error) => setError(e.message))
   }, [])
 
-  // Select a channel once the list is known: the remembered one, or the first.
+  // A channel's latest episodes are read from its feed only when the learner opens it (nothing is open at first)
   useEffect(() => {
-    if (!channels || channels.length === 0) return
-    if (channelId === null || !channels.some((c) => c.id === channelId)) setChannelId(channels[0].id)
-  }, [channels, channelId])
-
-  // The selected channel's latest episodes are read from its feed each time
-  useEffect(() => {
-    if (channelId === null) return
-    try { localStorage.setItem(CHANNEL_KEY, String(channelId)) } catch { /* not remembered */ }
+    if (channelId === null) { setLoadingChannel(false); return }
     let stale = false
     setLoadingChannel(true); setChannelShow(null)
     api.channelEpisodes(channelId)
@@ -93,6 +76,9 @@ function PodcastTab() {
   }, [channelId])
 
   const pickChannel = (id: number) => { setChannelId(id); setResult(null); setShowAll(false) }
+  const closeChannel = () => { setChannelId(null); setChannelShow(null) }
+  // Clicking the open channel again closes its episode list
+  const toggleChannel = (id: number) => (id === channelId && result === null ? closeChannel() : pickChannel(id))
 
   const follow = async (feedUrl: string) => {
     setFollowing(true); setError('')
@@ -181,7 +167,7 @@ function PodcastTab() {
             {channels.map((c) => (
               <button
                 key={c.id}
-                onClick={() => pickChannel(c.id)}
+                onClick={() => toggleChannel(c.id)}
                 aria-pressed={c.id === channelId && result === null}
                 className={`flex items-center gap-2 rounded-full py-1 pl-1 pr-3 text-sm ${c.id === channelId && result === null ? 'bg-indigo-600 text-white' : 'bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600'}`}
               >
@@ -226,7 +212,15 @@ function PodcastTab() {
           <div className="mb-3 flex items-center gap-3">
             {show.image && <img src={show.image} alt="" className="h-14 w-14 rounded-lg object-cover" />}
             <div className="min-w-0 flex-1">
-              <h2 className="font-semibold">{show.title}</h2>
+              {currentChannel ? (
+                <h2 className="font-semibold">
+                  <button onClick={closeChannel} aria-expanded="true" title="收起集數" className="text-left hover:text-indigo-600">
+                    {show.title} <span className="text-sm font-normal text-slate-400">▲ 收起</span>
+                  </button>
+                </h2>
+              ) : (
+                <h2 className="font-semibold">{show.title}</h2>
+              )}
               <p className="text-sm text-slate-500">共 {show.episodes.length} 集，選一集載入</p>
             </div>
             {result?.type === 'feed' && (
