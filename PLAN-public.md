@@ -21,7 +21,8 @@ OpenCode Zen 免費模型的注意事項（2026-10 查證）：免費模型是�
 
 ## Phase 0 — 基準測試（Mac mini，主要由使用者執行）
 
-- [ ] 0.1 RAM 峰值：在 mini 上同時跑一支 10 分鐘影片轉錄（本地 whisper large-v3-turbo）＋連續 AI 句子說明（qwen3:8b），另開終端機 `vm_stat 5` / `memory_pressure`，記下是否進 swap、壓縮記憶體多少
+- [x] 0.1 RAM 峰值：在 mini 上同時跑一支 10 分鐘影片轉錄（本地 whisper large-v3-turbo）＋連續 AI 句子說明（qwen3:8b），另開終端機 `vm_stat 5` / `memory_pressure`，記下是否進 swap、壓縮記憶體多少
+  - **結果（2026-10-02）**：同時跑時記憶體壓力**全程黃色**；wired ≈ 7.2 GB（qwen3:8b 在 GPU 佔 5.6 GB）、壓縮區 ≈ 4.9 GB、free < 0.2 GB；每 5 秒寫出 swap 最多約 190 MB，測試期間共寫出約 2.6 GB。結論：**16 GB 不能同時載入 qwen3:8b + whisper large-v3-turbo**；本地只能當備援、一次只放一個模型在記憶體
 - [ ] 0.2 使用者到 opencode.ai 登入取得 Zen API key，到 Groq 取得 API key（只放 mini 的設定頁，不進 git）
 - [ ] 0.3 模型評估：用 `backend/data/model_compare.*` 的方式，拿 Space Bunny / LongCat / 一個 MiMo 免費模型各跑 20 句「句子說明 + 翻譯 + 單字解釋」，比較 JSON 解析成功率、繁中品質、延遲、是否被限流（429）
 - [ ] 0.4 依結果決定：LLM 主模型、本地 fallback 模型、每日配額數字（寫回本檔「已定案的決策」）
@@ -51,6 +52,7 @@ OpenCode Zen 免費模型的注意事項（2026-10 查證）：免費模型是�
 ## Phase 2 — 運算佇列、模型路由、配額（程式，Sonnet）
 
 - [ ] 2.1 全域「本地重運算鎖」：本地 whisper、Ollama、本地 TTS、shadowing 的本地 STT 同時只跑一個（`threading.Semaphore(1)`，async 端用 `asyncio.to_thread` 取鎖）。先盤點所有呼叫點：`transcribe.py`、`llm.py`（Ollama provider）、`tts.py`、`shadowing.py`、`pipeline.py`、`explain_queue.py`。雲端呼叫不吃這把鎖
+- [ ] 2.1b 換模型前先釋放：要跑本地 whisper／TTS 前，先請 Ollama 卸載模型（`POST /api/generate {"model":…, "keep_alive":0}`）；whisper 用完也釋放（mlx 清快取）。Ollama 請求一律帶較短的 `keep_alive`（例如 60s），不要讓 5.6 GB 一直佔著（依 0.1 的實測結果）
 - [ ] 2.2 LLM 路由：`llm.py` 新增「主要 = cloud（OpenCode Zen）、失敗（連線錯誤、429、5xx、逾時、JSON 解析連續失敗）→ 本地 Ollama」的 fallback provider；設定頁加「失敗時改用本地模型」開關。AI 快取 key 已含模型名，不用改
 - [ ] 2.3 STT 路由：同樣做 cloud（Groq）→ 本地 mlx-whisper 的 fallback
 - [ ] 2.4 排隊狀態：影片處理佇列回報「排隊中，前面 N 個」；句子說明在等鎖時送一個 `{"type":"queued","position":N}` 事件；前端顯示，而不是空轉
