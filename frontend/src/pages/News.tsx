@@ -5,21 +5,10 @@ import type { Book, BookLevel, FeedItem, NewsFeed } from '../api/types'
 import BookCard from '../components/BookCard'
 import { LEVELS, LEVEL_STYLES, countByLevel, filterByLevel } from '../lib/books'
 
-const FEED_KEY = 'news-feed'
-
-function loadFeedId(): number | null {
-  try {
-    const n = Number(localStorage.getItem(FEED_KEY))
-    return Number.isInteger(n) && n > 0 ? n : null
-  } catch {
-    return null
-  }
-}
-
 export default function News() {
   const navigate = useNavigate()
   const [feeds, setFeeds] = useState<NewsFeed[] | null>(null)
-  const [feedId, setFeedId] = useState<number | null>(loadFeedId)
+  const [feedId, setFeedId] = useState<number | null>(null)
   const [items, setItems] = useState<FeedItem[] | null>(null)
   const [loadingItems, setLoadingItems] = useState(false)
   const [articles, setArticles] = useState<Book[] | null>(null)
@@ -34,15 +23,9 @@ export default function News() {
   const refreshFeeds = useCallback(() => api.listFeeds().then(setFeeds).catch((e: Error) => setError(e.message)), [])
   useEffect(() => { void refreshArticles(); void refreshFeeds() }, [refreshArticles, refreshFeeds])
 
-  // Select a feed once the list is known: the remembered one, or the first.
+  // A feed's latest articles are read only when the learner opens it (nothing is open at first)
   useEffect(() => {
-    if (!feeds || feeds.length === 0) return
-    if (feedId === null || !feeds.some((f) => f.id === feedId)) setFeedId(feeds[0].id)
-  }, [feeds, feedId])
-
-  useEffect(() => {
-    if (feedId === null) return
-    try { localStorage.setItem(FEED_KEY, String(feedId)) } catch { /* not remembered */ }
+    if (feedId === null) { setLoadingItems(false); setItems(null); return }
     let stale = false
     setLoadingItems(true); setItems(null)
     api.feedItems(feedId)
@@ -51,6 +34,9 @@ export default function News() {
       .finally(() => !stale && setLoadingItems(false))
     return () => { stale = true }
   }, [feedId])
+
+  // Clicking the open feed again closes its list
+  const toggleFeed = (id: number) => setFeedId((prev) => (prev === id ? null : id))
 
   const open = async (url: string, articleId: number | null = null) => {
     if (articleId !== null) return navigate(`/news/${articleId}`)
@@ -115,7 +101,7 @@ export default function News() {
           {feeds?.map((f) => (
             <button
               key={f.id}
-              onClick={() => setFeedId(f.id)}
+              onClick={() => toggleFeed(f.id)}
               aria-pressed={f.id === feedId}
               className={`rounded-full px-3 py-1 text-sm ${f.id === feedId ? 'bg-indigo-600 text-white' : 'bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600'}`}
             >
@@ -132,6 +118,13 @@ export default function News() {
         )}
         {feeds?.length === 0 && <p className="py-4 text-slate-400">還沒有訂閱，按「＋ 新增訂閱」貼上 RSS 網址。</p>}
         {loadingItems && <p className="py-6 text-center text-slate-400">讀取最新文章中…</p>}
+        {current && items && (
+          <h3 className="mb-2 font-semibold">
+            <button onClick={() => setFeedId(null)} aria-expanded="true" title="收起文章" className="text-left hover:text-indigo-600">
+              {current.title} <span className="text-sm font-normal text-slate-400">▲ 收起</span>
+            </button>
+          </h3>
+        )}
         {items && (
           <ul className="divide-y divide-slate-200 rounded-xl border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
             {items.map((item) => (
