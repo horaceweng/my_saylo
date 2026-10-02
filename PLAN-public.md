@@ -12,7 +12,7 @@
 | 對外方式 | **Tailscale Funnel** → `https://horacemac-mini.tailcf37df.ts.net/`（免費、自動 HTTPS，麥克風可用） |
 | 資料分法 | **內容共享、學習紀錄分人**：影片/段落/書/章節/新聞源/Podcast/AI 快取全站共用；片語庫（含 SRS 進度）、錄音、使用量綁 `user_id` |
 | 帳號 | 邀請制：管理員產生邀請碼 → 對方用邀請碼註冊。沒有公開註冊 |
-| 費用 | 擁有者出；LLM 優先用 **OpenCode Zen 免費模型**（`https://opencode.ai/zen/v1`，OpenAI 相容），失敗退回本地 Ollama；STT 用 Groq（$0.04/小時音訊），失敗退回本地 mlx-whisper；每人每日配額 |
+| 費用 | 擁有者出；LLM 主力用 **OpenCode Zen `space-bunny-free`**（`https://opencode.ai/zen/v1`，OpenAI 相容；使用者已知 OpenCode 表明免費額度只限自家客戶端、可能隨時被擋，接受此風險），失敗退回本地 Ollama（建議 `gemma4:e4b`，比 qwen3:8b 小）並記錄失敗次數與原因；STT 用 Groq（$0.04/小時音訊），失敗退回本地 mlx-whisper；每人每日配額 |
 | 設定 | `Setting` 表維持全站一份，**只有管理員**能看/改；一般使用者看不到任何 key |
 
 OpenCode Zen 免費模型的注意事項（2026-10 查證）：免費模型是限時提供、會輪替；多數免費模型的輸入可能被拿去訓練（Space Bunny、LongCat 標示 zero-retention，優先選這兩個）；**沒有語音轉文字**。所以必須有退回本地的機制，且模型名要能在設定頁改。
@@ -23,9 +23,10 @@ OpenCode Zen 免費模型的注意事項（2026-10 查證）：免費模型是�
 
 - [x] 0.1 RAM 峰值：在 mini 上同時跑一支 10 分鐘影片轉錄（本地 whisper large-v3-turbo）＋連續 AI 句子說明（qwen3:8b），另開終端機 `vm_stat 5` / `memory_pressure`，記下是否進 swap、壓縮記憶體多少
   - **結果（2026-10-02）**：同時跑時記憶體壓力**全程黃色**；wired ≈ 7.2 GB（qwen3:8b 在 GPU 佔 5.6 GB）、壓縮區 ≈ 4.9 GB、free < 0.2 GB；每 5 秒寫出 swap 最多約 190 MB，測試期間共寫出約 2.6 GB。結論：**16 GB 不能同時載入 qwen3:8b + whisper large-v3-turbo**；本地只能當備援、一次只放一個模型在記憶體
-- [ ] 0.2 使用者到 opencode.ai 登入取得 Zen API key，到 Groq 取得 API key（只放 mini 的設定頁，不進 git）
-- [ ] 0.3 模型評估：用 `backend/data/model_compare.*` 的方式，拿 Space Bunny / LongCat / 一個 MiMo 免費模型各跑 20 句「句子說明 + 翻譯 + 單字解釋」，比較 JSON 解析成功率、繁中品質、延遲、是否被限流（429）
-- [ ] 0.4 依結果決定：LLM 主模型、本地 fallback 模型、每日配額數字（寫回本檔「已定案的決策」）
+- [x] 0.2 使用者到 opencode.ai 登入取得 Zen API key，到 Groq 取得 API key（只放 mini 的設定頁，不進 git）
+- [x] 0.3 模型評估：用 `backend/data/model_compare.*` 的方式，拿 Space Bunny / LongCat / 一個 MiMo 免費模型各跑 20 句「句子說明 + 翻譯 + 單字解釋」，比較 JSON 解析成功率、繁中品質、延遲、是否被限流（429）
+  - **結果（2026-10-02，詳見 `backend/data/model_compare_zen.md`）**：10 個免費模型中 9 個從 API 呼叫一律 403 `FreeTierError: OpenCode's free tier can only be used from within OpenCode`；只有 `space-bunny-free` 可用：31/31 次 JSON 第一次就合法、延遲中位 13.1 秒／p90 24.5 秒、0 次 429；說明文字偶有簡體字（构、调、强、赶），翻譯欄位全為繁體；品質優於本地 9B/4B，偶有不自然例句
+- [x] 0.4 依結果決定：LLM 主模型、本地 fallback 模型、每日配額數字（寫回本檔「已定案的決策」）：主模型 `space-bunny-free`；本地備援建議 `gemma4:e4b`（需使用者在 mini 上 `ollama pull`）；配額先用 Phase 2 預設值，Phase 5 再依實際用量調整
 
 驗證：本檔記錄 0.1 的數字與 0.3 選定的模型。
 
@@ -97,6 +98,11 @@ OpenCode Zen 免費模型的注意事項（2026-10 查證）：免費模型是�
 ## Phase 6 — 之後再決定
 
 維持邀請制（YouTube/Podcast 轉錄的版權/ToS 風險，不建議公開註冊）；若人數變多再評估 Cloudflare Tunnel、付費 LLM、獨立服務帳號。
+
+## Phase 3.5 — 部署前補強（程式，Sonnet）
+
+- [ ] 3.7 書的閱讀進度改成每人各自一份（目前全站共用一個值）
+- [ ] 3.8 雲端模型失敗紀錄：每次失敗記下原因（HTTP 狀態碼／錯誤類型／訊息摘要），管理員頁顯示今日與 7 天內依原因分類的次數、最後一次失敗的時間與訊息；最近連續多次都是 403／FreeTierError 時，管理員頁明顯提示「雲端模型可能已被停用」
 
 ## 待議（使用者 2026-10-02 提出，以後再說）
 
