@@ -80,14 +80,15 @@ OpenCode Zen 免費模型的注意事項（2026-10 查證）：免費模型是�
 
 部署前：在 mini 上 `sqlite3 backend/data/app.sqlite ".backup backend/data/app.before-multiuser.sqlite"`。
 
-- [ ] 4.1 mini：`git pull`、`uv sync`、`npm install && npm run build`、`uv run python scripts/create_admin.py horace`
-- [ ] 4.2 launchd：`~/Library/LaunchAgents/com.horaceweng.english-app.plist` 跑 `start-prod.sh`，`KeepAlive`、log 到 `~/Library/Logs/EnglishApp/`（仿照 `com.horaceweng.tradingstrategy`）；Ollama App 設為登入時開啟。先停掉手動跑的那份再 load
+- [x] 4.1 mini：`git pull`、`uv sync`、`npm install && npm run build`、`uv run python scripts/create_admin.py horace`
+- [x] 4.2 launchd：`~/Library/LaunchAgents/com.horaceweng.english-app.plist` 跑 `start-prod.sh`，`KeepAlive`、log 到 `~/Library/Logs/EnglishApp/`（仿照 `com.horaceweng.tradingstrategy`）；Ollama App 設為登入時開啟。先停掉手動跑的那份再 load
   - 已準備（部署待執行）：`deploy/macmini/com.horaceweng.english-app.plist`，`start-prod.sh` 補了 PATH（~/.local/bin、/opt/homebrew/bin）與不等待終端機輸入；步驟見 `deploy/macmini/README.md`
-- [ ] 4.3 Tailscale Funnel：使用者在 Tailscale 管理後台的 ACL 開啟 funnel nodeAttr，並關閉 mini 的 key expiry；mini 上 `tailscale funnel --bg 8000`；確認 `https://horacemac-mini.tailcf37df.ts.net/` 外網（手機關 Wi-Fi）可開、麥克風可用；確認 4321、8500 **沒有**被 funnel（`tailscale funnel status`）
-- [ ] 4.4 每日備份：launchd 每天 04:00 跑 `scripts/backup.sh`：`sqlite3 .backup` 到 `~/Backups/english-app/app-YYYYMMDD.sqlite`，保留 14 份，加上 `data/recordings/` rsync。**不要**放進 `~/MEGA`（避免同步正在寫的 SQLite）
+- [x] 4.3 Tailscale Funnel：使用者在 Tailscale 管理後台的 ACL 開啟 funnel nodeAttr，並關閉 mini 的 key expiry；mini 上 `tailscale funnel --bg 8000`；確認 `https://horacemac-mini.tailcf37df.ts.net/` 外網（手機關 Wi-Fi）可開、麥克風可用；確認 4321、8500 **沒有**被 funnel（`tailscale funnel status`）
+- [x] 4.4 每日備份：launchd 每天 04:00 跑 `scripts/backup.sh`：`sqlite3 .backup` 到 `~/Backups/english-app/app-YYYYMMDD.sqlite`，保留 14 份，加上 `data/recordings/` rsync。**不要**放進 `~/MEGA`（避免同步正在寫的 SQLite）
   - 已準備（部署待執行）：`scripts/backup.sh` ＋ `deploy/macmini/com.horaceweng.english-app-backup.plist`；備份後做 `integrity_check`，已在本機以假資料測過保留 14 份
-- [ ] 4.5 磁碟：管理員頁顯示 `data/` 大小與剩餘空間；剩餘 < 20 GB 時拒絕新的媒體匯入
+- [x] 4.5 磁碟：管理員頁顯示 `data/` 大小與剩餘空間；剩餘 < 20 GB 時拒絕新的媒體匯入
   - 已準備（程式已完成並測試，部署待執行）：`services/disk.py`、`GET /api/admin/disk`、管理員頁「磁碟」區塊；`min_free_disk_gb`（預設 20）；影片／Podcast／上傳音檔／書籍上傳與 Gutenberg 匯入在不足時回 507
+- [x] 4.1–4.5 已於 2026-10-02 部署並確認：launchd 執行中（127.0.0.1:8000）、手動備份 integrity ok、Funnel 只轉 `/` → 127.0.0.1:8000、手機外網登入成功
 - [ ] 4.6 使用者自己做（sudo / 系統設定）：`sudo pmset -a autorestart 1`（停電後自動開機）；系統設定 → 一般 → 軟體更新：關閉「安裝 macOS 更新」自動安裝；系統設定 → 網路 → 防火牆：開啟；考慮購買 UPS
 - [ ] 4.7 專用非管理員帳號：**這次不做**（其他服務都跑在 horacemac，launchd 也是；app 只綁 127.0.0.1 已降低曝險）。之後若擴大再評估
 
@@ -110,3 +111,4 @@ OpenCode Zen 免費模型的注意事項（2026-10 查證）：免費模型是�
 ## 待議（使用者 2026-10-02 提出，以後再說）
 
 - 跟讀可考慮「只錄音回放、不做 AI 判斷」模式：不跑 Whisper 辨識、不呼叫 LLM 評語，只讓使用者回放自己的錄音和原句對照。可做成使用者自選或管理員全站開關，能大幅減輕 mini 的運算負擔。
+- 首次使用本地 Whisper 時要從網路下載模型（約 1.5 GB，2026-10-02 在 mini 上花了 2 分 19 秒），期間跟讀畫面只顯示「比對中」，看起來像當掉。改法：部署腳本預先下載 `settings.whisper_model`，和／或畫面顯示「首次使用，正在下載語音模型」。可與上一項（只回放模式）一起處理。
