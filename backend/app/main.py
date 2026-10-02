@@ -12,6 +12,7 @@ from app.frontend import mount_frontend
 from app.db import engine, init_db
 from app.deps import current_user, optional_user
 from app.models import User
+from app.security import SecurityHeaders
 from app.routers import admin, ai, auth, books, dictionary, media, news, phrases, podcasts, settings as settings_router, shadowing, tts
 from app.services import resegment, app_settings
 from app.services import pipeline
@@ -60,6 +61,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="English Lab", lifespan=lifespan)
+app.add_middleware(SecurityHeaders)  # no CORS middleware: the page and the API share one origin
 app.include_router(auth.router)  # the only router open to everyone
 # Everything else needs a login; settings and admin routers ask for an admin on top (see their own dependencies).
 for r in (media.router, podcasts.router, books.router, news.router, dictionary.router, ai.router, phrases.router, shadowing.router, settings_router.router, tts.router, admin.router):
