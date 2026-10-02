@@ -19,5 +19,6 @@ if [ ! -f dist/index.html ] || [ -n "$(find src index.html package.json -newer d
 fi
 
 cd "$ROOT/backend"
-echo "開啟 http://localhost:8000"
-exec uv run fastapi run app/main.py --port 8000
+echo "開啟 http://localhost:8000（之後這裡只會顯示警告與錯誤，按 Ctrl+C 結束）"
+# Quiet unless something goes wrong: no start-up banner, no line per request; warnings and errors still show.
+exec uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level warning --no-access-log
