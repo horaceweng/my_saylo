@@ -89,8 +89,8 @@ OpenCode Zen 免費模型的注意事項（2026-10 查證）：免費模型是�
 - [x] 4.5 磁碟：管理員頁顯示 `data/` 大小與剩餘空間；剩餘 < 20 GB 時拒絕新的媒體匯入
   - 已準備（程式已完成並測試，部署待執行）：`services/disk.py`、`GET /api/admin/disk`、管理員頁「磁碟」區塊；`min_free_disk_gb`（預設 20）；影片／Podcast／上傳音檔／書籍上傳與 Gutenberg 匯入在不足時回 507
 - [x] 4.1–4.5 已於 2026-10-02 部署並確認：launchd 執行中（127.0.0.1:8000）、手動備份 integrity ok、Funnel 只轉 `/` → 127.0.0.1:8000、手機外網登入成功
-- [ ] 4.6 使用者自己做（sudo / 系統設定）：`sudo pmset -a autorestart 1`（停電後自動開機）；系統設定 → 一般 → 軟體更新：關閉「安裝 macOS 更新」自動安裝；系統設定 → 網路 → 防火牆：開啟；考慮購買 UPS
-  - 2026-10-02 確認：autorestart 1、防火牆開啟、自動下載／安裝更新已關閉、LLM 已切到 OpenCode Zen `space-bunny-free`（雲端呼叫成功）。**自動登入未生效：FileVault 開著時 macOS 不允許自動登入**，停電重開後會停在解鎖畫面，app 與 Tailscale 都不會啟動 → 待使用者決定（關 FileVault，或保留並接受停電後要手動解鎖）
+- [x] 4.6 使用者自己做（sudo / 系統設定）：`sudo pmset -a autorestart 1`（停電後自動開機）；系統設定 → 一般 → 軟體更新：關閉「安裝 macOS 更新」自動安裝；系統設定 → 網路 → 防火牆：開啟；考慮購買 UPS
+  - 2026-10-02 確認：autorestart 1、防火牆開啟、自動下載／安裝更新已關閉、LLM 已切到 OpenCode Zen `space-bunny-free`（雲端呼叫成功）。**自動登入未生效：FileVault 開著時 macOS 不允許自動登入**，停電重開後會停在解鎖畫面，app 與 Tailscale 都不會啟動 → 使用者決定**先維持 FileVault 開啟**：停電後需到 mini 前輸入密碼；自己重開機用 `sudo fdesetup authrestart`。Tailscale key expiry 已關閉
 - [ ] 4.7 專用非管理員帳號：**這次不做**（其他服務都跑在 horacemac，launchd 也是；app 只綁 127.0.0.1 已降低曝險）。之後若擴大再評估
 
 驗證：重開 mini 後不登入任何東西，3 分鐘內外網可打開登入頁；隔天 `~/Backups/english-app/` 有檔案。
