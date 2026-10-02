@@ -9,9 +9,12 @@ import feedparser
 import httpx
 import trafilatura
 
+from app.services import safe_fetch
+
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; EnglishLab/1.0)", "Accept-Language": "en"}
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 MAX_PAGE_BYTES = 6 * 1024 * 1024
+MAX_FEED_BYTES = 8 * 1024 * 1024
 MIN_ARTICLE_WORDS = 80
 _TRACKING = re.compile(r"^(utm_|at_|ocid$|cmp$|xtor$|ns_|fbclid$|gclid$|mc_|ref$|smid$|taid$|embedded-checkout$)", re.I)
 
@@ -61,6 +64,14 @@ def check_url(url: str) -> str:
     return url
 
 
+def _get(url: str, client: httpx.Client | None, max_bytes: int) -> httpx.Response:
+    """The guarded download (see services/safe_fetch.py): public addresses only, redirects checked, size capped."""
+    try:
+        return safe_fetch.fetch(url, max_bytes=max_bytes, too_big="這個網頁太大，不像是一篇文章", timeout=TIMEOUT, headers=HEADERS, client=client)
+    except safe_fetch.FetchError as e:
+        raise NewsError(str(e)) from e
+
+
 def canonical_url(url: str) -> str:
     """The link without tracking parameters and fragment, so one article is one article."""
     parts = urlparse(url.strip())
@@ -74,22 +85,15 @@ def url_key(url: str) -> str:
 
 def fetch_html(url: str, client: httpx.Client | None = None) -> str:
     url = check_url(url)
-    own = client is None
-    client = client or httpx.Client(timeout=TIMEOUT, follow_redirects=True, headers=HEADERS)
     try:
-        resp = client.get(url)
-        if resp.status_code in (401, 402, 403):
-            raise NewsError(f"這個網站不讓程式讀取（HTTP {resp.status_code}），可能需要登入或有付費牆")
-        if resp.status_code >= 400:
-            raise NewsError(f"無法讀取這個網址（HTTP {resp.status_code}）")
-        if len(resp.content) > MAX_PAGE_BYTES:
-            raise NewsError("這個網頁太大，不像是一篇文章")
-        return resp.text
+        resp = _get(url, client, MAX_PAGE_BYTES)
     except httpx.HTTPError as e:
         raise NewsError(f"連不上這個網址：{e}") from e
-    finally:
-        if own:
-            client.close()
+    if resp.status_code in (401, 402, 403):
+        raise NewsError(f"這個網站不讓程式讀取（HTTP {resp.status_code}），可能需要登入或有付費牆")
+    if resp.status_code >= 400:
+        raise NewsError(f"無法讀取這個網址（HTTP {resp.status_code}）")
+    return resp.text
 
 
 def looks_english(text: str) -> bool:
@@ -148,17 +152,12 @@ def _plain(text: str, limit: int = 220) -> str:
 def read_feed(url: str, client: httpx.Client | None = None) -> tuple[str, list[FeedItem]]:
     """(feed title, latest items). Raises NewsError if the link is not a feed with articles."""
     url = check_url(url)
-    own = client is None
-    client = client or httpx.Client(timeout=TIMEOUT, follow_redirects=True, headers=HEADERS)
     try:
-        resp = client.get(url)
-        if resp.status_code >= 400:
-            raise NewsError(f"無法讀取這個訂閱（HTTP {resp.status_code}）")
+        resp = _get(url, client, MAX_FEED_BYTES)
     except httpx.HTTPError as e:
         raise NewsError(f"連不上這個網址：{e}") from e
-    finally:
-        if own:
-            client.close()
+    if resp.status_code >= 400:
+        raise NewsError(f"無法讀取這個訂閱（HTTP {resp.status_code}）")
     parsed = feedparser.parse(resp.content)
     items = []
     for entry in parsed.entries:

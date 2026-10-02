@@ -12,7 +12,7 @@ from app.db import get_session
 from app.deps import admin_user, current_user
 from app.models import Feed, Media, User
 from app.routers.media import media_out, media_stats
-from app.services import pipeline, podcast, usage
+from app.services import pipeline, podcast, safe_fetch, usage
 from app.services.podcast import PodcastError
 
 router = APIRouter(prefix="/api/podcasts", tags=["podcasts"])
@@ -102,7 +102,8 @@ async def channel_episodes(channel_id: int, session: Session = Depends(get_sessi
 def add_podcast(body: CreatePodcast, session: Session = Depends(get_session), user: User = Depends(current_user)):
     try:
         url = podcast.check_url(body.audio_url)
-    except PodcastError as e:
+        safe_fetch.vet(url)  # refuse addresses on this machine or its networks now, not only when the download starts
+    except (PodcastError, safe_fetch.FetchError) as e:
         raise HTTPException(400, str(e)) from e
     existing = session.exec(select(Media).where(Media.kind == "podcast", Media.source_url == url)).first()
     if existing:

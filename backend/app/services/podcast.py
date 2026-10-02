@@ -2,6 +2,7 @@
 
 import hashlib
 import re
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -9,9 +10,12 @@ from urllib.parse import urlparse
 import feedparser
 import httpx
 
+from app.services import safe_fetch
+
 AUDIO_EXTENSIONS = (".mp3", ".m4a", ".aac", ".wav", ".ogg", ".oga", ".opus", ".flac", ".mp4")
 MAX_FEED_BYTES = 8 * 1024 * 1024
 MAX_AUDIO_BYTES = 600 * 1024 * 1024
+MAX_DOWNLOAD_SECONDS = 30 * 60
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; EnglishLab/1.0)"}
 
@@ -85,7 +89,8 @@ def _plain(text: str, limit: int = 300) -> str:
 
 
 def parse_feed(xml: str | bytes) -> Feed:
-    parsed = feedparser.parse(xml)
+    # Always bytes: feedparser treats a str as a link or a file name to open before it treats it as the feed itself.
+    parsed = feedparser.parse(xml.encode() if isinstance(xml, str) else xml)
     if not parsed.entries and not parsed.feed.get("title"):
         raise PodcastError("這不是有效的 Podcast RSS，也不是音檔連結")
     episodes = []
@@ -118,25 +123,22 @@ def fetch_feed_or_audio(url: str, client: httpx.Client | None = None) -> dict:
     """Look at what a link points to: {"type": "audio", ...} for an audio file, {"type": "feed", ...} for RSS."""
     url = check_url(url)
     if looks_like_audio_url(url):
+        try:
+            safe_fetch.vet(url)  # nothing is downloaded here, but a link to this machine is refused right away
+        except safe_fetch.FetchError as e:
+            raise PodcastError(str(e)) from e
         return {"type": "audio", "audio_url": url}
-    own = client is None
-    client = client or httpx.Client(timeout=TIMEOUT, follow_redirects=True, headers=HEADERS)
     try:
-        with client.stream("GET", url) as resp:
+        with safe_fetch.open_stream(url, timeout=TIMEOUT, headers=HEADERS, client=client) as resp:
             if resp.status_code >= 400:
                 raise PodcastError(f"無法讀取這個網址（HTTP {resp.status_code}）")
             if (resp.headers.get("content-type") or "").startswith("audio/"):
                 return {"type": "audio", "audio_url": url}
-            body = b""
-            for chunk in resp.iter_bytes():
-                body += chunk
-                if len(body) > MAX_FEED_BYTES:
-                    raise PodcastError("這個網址的內容太大，不像是 Podcast RSS")
+            body = safe_fetch.read_limited(resp, MAX_FEED_BYTES, "這個網址的內容太大，不像是 Podcast RSS", time.monotonic() + 60)
+    except safe_fetch.FetchError as e:
+        raise PodcastError(str(e)) from e
     except httpx.HTTPError as e:
         raise PodcastError(f"連不上這個網址：{e}") from e
-    finally:
-        if own:
-            client.close()
     return {"type": "feed", **parse_feed(body).to_dict()}
 
 
@@ -158,11 +160,10 @@ def download_audio(url: str, dest_dir: Path, progress=None, client: httpx.Client
     known = next(iter(dest_dir.glob(f"podcast_{hashlib.sha1(url.encode()).hexdigest()[:16]}.*")), None)
     if known and known.exists() and not known.name.endswith(".part"):
         return known
-    own = client is None
-    client = client or httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0), follow_redirects=True, headers=HEADERS)
     partial = None
+    started = time.monotonic()
     try:
-        with client.stream("GET", url) as resp:
+        with safe_fetch.open_stream(url, timeout=httpx.Timeout(60.0, connect=10.0), headers=HEADERS, client=client) as resp:
             if resp.status_code >= 400:
                 raise PodcastError(f"下載失敗（HTTP {resp.status_code}）")
             target = dest_dir / audio_filename(url, resp.headers.get("content-type", ""))
@@ -176,6 +177,8 @@ def download_audio(url: str, dest_dir: Path, progress=None, client: httpx.Client
                     written += len(chunk)
                     if written > MAX_AUDIO_BYTES:
                         raise PodcastError("音檔太大（超過 600 MB）")
+                    if time.monotonic() - started > MAX_DOWNLOAD_SECONDS:
+                        raise PodcastError("下載太久，已中止")
                     out.write(chunk)
                     if progress and total and written / total - last_reported >= 0.05:
                         last_reported = written / total
@@ -185,10 +188,10 @@ def download_audio(url: str, dest_dir: Path, progress=None, client: httpx.Client
             partial.replace(target)
             partial = None
             return target
+    except safe_fetch.FetchError as e:
+        raise PodcastError(str(e)) from e
     except httpx.HTTPError as e:
         raise PodcastError(f"下載中斷：{e}") from e
     finally:
         if partial is not None:
             partial.unlink(missing_ok=True)
-        if own:
-            client.close()

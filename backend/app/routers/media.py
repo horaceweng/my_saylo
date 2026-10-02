@@ -93,7 +93,7 @@ async def create_media(body: CreateMedia, session: Session = Depends(get_session
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"無法取得影片資訊：{str(e)[:200]}") from e
     usage.charge_media(session, user, info.get("duration", 0))
-    media = Media(kind="video", source_url=body.url, external_id=video_id, added_by=user.id, **info)
+    media = Media(kind="video", source_url=youtube.watch_url(video_id), external_id=video_id, added_by=user.id, **info)
     session.add(media)
     session.commit()
     session.refresh(media)

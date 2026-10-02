@@ -10,6 +10,13 @@ from app.config import settings
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
+def watch_url(video_id: str) -> str:
+    """The only address yt-dlp ever receives: built here from a checked id, never the text the user typed."""
+    if not _ID_RE.match(video_id):
+        raise ValueError("not a video id")
+    return f"https://www.youtube.com/watch?v={video_id}"
+
+
 def extract_video_id(url: str) -> str | None:
     """Return the 11-char video id from any common YouTube URL form."""
     url = url.strip()
@@ -31,9 +38,9 @@ def extract_video_id(url: str) -> str | None:
 
 
 def fetch_info(video_id: str) -> dict:
-    opts = {"quiet": True, "skip_download": True, "noplaylist": True, "js_runtimes": {"node": {}}}
+    opts = {"quiet": True, "allowed_extractors": ["youtube"], "skip_download": True, "noplaylist": True, "js_runtimes": {"node": {}}}
     with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        info = ydl.extract_info(watch_url(video_id), download=False)
     return {
         "title": info.get("title", ""),
         "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
@@ -50,6 +57,7 @@ def download_audio(video_id: str) -> Path:
         return target
     opts = {
         "quiet": True,
+        "allowed_extractors": ["youtube"],
         "js_runtimes": {"node": {}},
         "noplaylist": True,
         "format": "bestaudio[ext=m4a]/bestaudio",
@@ -57,7 +65,7 @@ def download_audio(video_id: str) -> Path:
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}],
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+        ydl.download([watch_url(video_id)])
     return target
 
 

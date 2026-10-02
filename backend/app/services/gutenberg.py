@@ -2,13 +2,17 @@
 
 import re
 from pathlib import Path
+from urllib.parse import urlencode
 
 import feedparser
 import httpx
 
+from app.services import safe_fetch
+
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; EnglishLab/1.0)"}
 TIMEOUT = httpx.Timeout(45.0, connect=10.0)
 MAX_EPUB_BYTES = 60 * 1024 * 1024
+MAX_FEED_BYTES = 4 * 1024 * 1024
 _BOOK_ENTRY = re.compile(r"/ebooks/(\d+)\.opds$")
 
 
@@ -25,18 +29,15 @@ def search(query: str, client: httpx.Client | None = None) -> list[dict]:
     query = " ".join(query.split())
     if not query:
         raise GutenbergError("請輸入書名或作者")
-    own = client is None
-    client = client or httpx.Client(timeout=TIMEOUT, follow_redirects=True, headers=HEADERS)
+    url = "https://www.gutenberg.org/ebooks/search.opds/?" + urlencode({"query": f"{query} l.en", "sort_order": "downloads"})
     try:
-        resp = client.get("https://www.gutenberg.org/ebooks/search.opds/", params={"query": f"{query} l.en", "sort_order": "downloads"})
-        resp.raise_for_status()
-    except httpx.HTTPError as e:
+        resp = safe_fetch.fetch(url, max_bytes=MAX_FEED_BYTES, timeout=TIMEOUT, headers=HEADERS, client=client)
+        if resp.status_code >= 400:
+            raise GutenbergError(f"連不上 Project Gutenberg，請稍後再試（HTTP {resp.status_code}）")
+    except (httpx.HTTPError, safe_fetch.FetchError) as e:
         raise GutenbergError(f"連不上 Project Gutenberg，請稍後再試（{e}）") from e
-    finally:
-        if own:
-            client.close()
     results = []
-    for entry in feedparser.parse(resp.text).entries:
+    for entry in feedparser.parse(resp.content).entries:
         match = _BOOK_ENTRY.search(entry.get("id", ""))
         if not match:
             continue  # "Subjects", "Authors" and paging entries share the feed
@@ -50,10 +51,8 @@ def download_epub(book_id: int, dest_dir: Path, client: httpx.Client | None = No
     dest_dir.mkdir(parents=True, exist_ok=True)
     target = dest_dir / f"gutenberg_{book_id}.epub"
     partial = target.with_suffix(".part")
-    own = client is None
-    client = client or httpx.Client(timeout=httpx.Timeout(120.0, connect=10.0), follow_redirects=True, headers=HEADERS)
     try:
-        with client.stream("GET", f"https://www.gutenberg.org/ebooks/{book_id}.epub.noimages") as resp:
+        with safe_fetch.open_stream(f"https://www.gutenberg.org/ebooks/{book_id}.epub.noimages", timeout=httpx.Timeout(120.0, connect=10.0), headers=HEADERS, client=client) as resp:
             if resp.status_code == 404:
                 raise GutenbergError("Project Gutenberg 找不到這本書的 EPUB")
             if resp.status_code >= 400:
@@ -69,9 +68,9 @@ def download_epub(book_id: int, dest_dir: Path, client: httpx.Client | None = No
             raise GutenbergError("下載到的檔案是空的")
         partial.replace(target)
         return target
+    except safe_fetch.FetchError as e:
+        raise GutenbergError(str(e)) from e
     except httpx.HTTPError as e:
         raise GutenbergError(f"下載中斷：{e}") from e
     finally:
         partial.unlink(missing_ok=True)
-        if own:
-            client.close()
