@@ -9,7 +9,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.config import settings
-from app.services import usage
+from app.services import cloudlog, usage
 from app.services.compute import Cooldown, heavy
 
 log = logging.getLogger("uvicorn.error")
@@ -114,14 +114,18 @@ def unload_ollama() -> None:
 heavy.register_unloader("ollama", unload_ollama)
 
 
-def _http_message(response: httpx.Response) -> str:
-    """What a cloud service's error means for the learner (never includes the key)."""
-    code = response.status_code
+def _http_detail(response: httpx.Response) -> str:
     try:
         detail = response.json()["error"]["message"]
     except Exception:  # noqa: BLE001 - the body may be anything
         detail = response.text
-    detail = str(detail).strip().replace("\n", " ")[:200]
+    return str(detail).strip().replace("\n", " ")[:200]
+
+
+def _http_message(response: httpx.Response) -> str:
+    """What a cloud service's error means for the learner (never includes the key)."""
+    code = response.status_code
+    detail = _http_detail(response)
     if code in (401, 403):
         return f"雲端服務拒絕了 API 金鑰（HTTP {code}）：請到「設定」檢查金鑰是否正確、有沒有開通"
     if code == 404:
@@ -139,7 +143,9 @@ class OpenAICompatProvider:
     """Any cloud service with the OpenAI chat API: Gemini, OpenAI, OpenRouter, Groq …
 
     JSON mode is asked for with `response_format`; a service that rejects it (HTTP 400) is asked again
-    without, and the answer is validated afterwards like any other."""
+    without, and the answer is validated afterwards like any other. Every real call is logged (services/cloudlog.py)."""
+
+    is_cloud = True
 
     def __init__(self, base_url: str | None = None, api_key: str | None = None, model: str | None = None):
         self.base_url = (base_url if base_url is not None else settings.cloud_base_url).rstrip("/")
@@ -159,6 +165,13 @@ class OpenAICompatProvider:
             payload["response_format"] = {"type": "json_object"}
         return payload
 
+    def _fail(self, message: str, error_class: str, *, status_code: int | None = None, detail: str = "") -> LLMError:
+        cloudlog.record(cloudlog.LLM, False, status_code=status_code, error_class=error_class, message=detail or message)
+        return LLMError(message)
+
+    def _fail_http(self, resp: httpx.Response) -> LLMError:
+        return self._fail(_http_message(resp), cloudlog.HTTP, status_code=resp.status_code, detail=_http_detail(resp))
+
     async def chat(self, system: str, user: str, *, json_mode: bool = False) -> str:
         url = f"{self.base_url}/chat/completions"
         try:
@@ -168,17 +181,18 @@ class OpenAICompatProvider:
                     if resp.status_code == 400 and json_mode:
                         resp = await client.post(url, json=self._payload(system, user, False, False), headers=self._headers())
         except TimeoutError as e:
-            raise LLMError(f"雲端服務超過 {settings.llm_request_seconds} 秒沒有回應") from e
+            raise self._fail(f"雲端服務超過 {settings.llm_request_seconds} 秒沒有回應", cloudlog.TIMEOUT, detail=f"timeout after {settings.llm_request_seconds}s") from e
         except httpx.HTTPError as e:
-            raise LLMError(f"連不上雲端服務：{type(e).__name__}") from e
+            raise self._fail(f"連不上雲端服務：{type(e).__name__}", cloudlog.classify(e), detail=f"{type(e).__name__}: {e}") from e
         if resp.status_code >= 400:
-            raise LLMError(_http_message(resp))
+            raise self._fail_http(resp)
         try:
             content = resp.json()["choices"][0]["message"]["content"]
         except (KeyError, IndexError, ValueError, TypeError) as e:
-            raise LLMError("雲端服務的回覆格式不對，請確認 Base URL 是 OpenAI 相容的網址") from e
+            raise self._fail("雲端服務的回覆格式不對，請確認 Base URL 是 OpenAI 相容的網址", cloudlog.INVALID_JSON, detail=f"unexpected reply: {resp.text[:100]}") from e
         if not content:
-            raise LLMError("雲端模型沒有回覆內容，請換一個模型試試")
+            raise self._fail("雲端模型沒有回覆內容，請換一個模型試試", cloudlog.OTHER, detail="empty reply")
+        cloudlog.record(cloudlog.LLM, True)
         return content
 
     async def stream(self, system: str, user: str, *, json_mode: bool = False) -> AsyncIterator[str]:
@@ -194,15 +208,16 @@ class OpenAICompatProvider:
                             continue  # this service does not take response_format: ask again without
                         if resp.status_code >= 400:
                             await resp.aread()
-                            raise LLMError(_http_message(resp))
+                            raise self._fail_http(resp)
                         async for line in resp.aiter_lines():
                             if time.monotonic() > deadline:
-                                raise LLMError(f"雲端服務超過 {settings.llm_request_seconds} 秒還沒寫完")
+                                raise self._fail(f"雲端服務超過 {settings.llm_request_seconds} 秒還沒寫完", cloudlog.TIMEOUT, detail="timeout while streaming")
                             line = line.strip()
                             if not line.startswith("data:"):
                                 continue
                             data = line[5:].strip()
                             if data == "[DONE]":
+                                cloudlog.record(cloudlog.LLM, True)
                                 return
                             try:
                                 chunk = json.loads(data)["choices"][0].get("delta", {}).get("content")
@@ -210,9 +225,10 @@ class OpenAICompatProvider:
                                 continue
                             if chunk:
                                 yield chunk
+                        cloudlog.record(cloudlog.LLM, True)
                         return
         except httpx.HTTPError as e:
-            raise LLMError(f"連不上雲端服務：{type(e).__name__}") from e
+            raise self._fail(f"連不上雲端服務：{type(e).__name__}", cloudlog.classify(e), detail=f"{type(e).__name__}: {e}") from e
 
 
 # After a cloud failure the cloud is skipped for a minute, so each request does not wait for the same timeout again.
@@ -300,7 +316,14 @@ async def _ask_json(provider: LLMProvider, system: str, user: str, schema: type[
             return schema.model_validate(json.loads(_strip_fence(raw)))
         except (json.JSONDecodeError, ValidationError) as e:
             last_err = e
+    if _asks_the_cloud(provider):  # the HTTP call itself was logged as fine; this says the answer was no use
+        cloudlog.record(cloudlog.LLM, False, error_class=cloudlog.INVALID_JSON, message=f"not valid JSON twice: {last_err}")
     raise LLMError(f"模型輸出不是有效的 JSON：{last_err}")
+
+
+def _asks_the_cloud(provider: object) -> bool:
+    inner = getattr(provider, "primary", provider)
+    return bool(getattr(inner, "is_cloud", False)) and not getattr(provider, "fell_back", False)
 
 
 def _strip_fence(text: str) -> str:

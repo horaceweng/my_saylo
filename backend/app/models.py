@@ -189,3 +189,15 @@ class UsageEvent(SQLModel, table=True):
     kind: str = Field(index=True)
     amount: float = 1.0
     created_at: datetime = Field(default_factory=_now, index=True)
+
+
+class CloudCall(SQLModel, table=True):
+    """One real call to a cloud service (`llm` or `stt`) and, when it failed, why (see services/cloudlog.py)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    service: str = Field(index=True)
+    ok: bool = True
+    status_code: int | None = None  # HTTP status, when the service answered
+    error_class: str = ""  # timeout | connection | http | invalid_json | other
+    message: str = ""  # an excerpt of at most 200 characters with keys removed
+    created_at: datetime = Field(default_factory=_now, index=True)

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
-import type { AdminUser, AdminUsage, Invite } from '../api/types'
+import type { AdminUser, AdminUsage, CloudSummary, Invite } from '../api/types'
+import { CLOUD_DISABLED_WARNING, reasonLabel } from '../lib/cloud'
 import { inviteLink } from '../lib/auth'
 import { usageLine } from '../lib/usage'
 import { useAuth } from '../hooks/useAuth'
@@ -36,6 +37,21 @@ function InviteRow({ invite }: { invite: Invite }) {
   )
 }
 
+function CloudFailures({ title, data }: { title: string; data: CloudSummary }) {
+  const last = data.last_failure
+  return (
+    <div className="mt-3 text-sm">
+      <h3 className="font-medium">{title}（今天共呼叫 {data.calls_today} 次）</h3>
+      {data.reasons.length === 0 ? <p className="text-xs text-slate-500">近 7 天沒有失敗</p> : (
+        <ul className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+          {data.reasons.map((r) => <li key={`${r.error_class}-${r.status_code}`}>{reasonLabel(r)}：今天 {r.today} 次，近 7 天 {r.week} 次</li>)}
+        </ul>
+      )}
+      {last && <p className="mt-1 break-words text-xs text-slate-500">最後一次失敗：{new Date(last.at).toLocaleString()}　{reasonLabel(last)}　{last.message}</p>}
+    </div>
+  )
+}
+
 export default function Users() {
   const { user: me } = useAuth()
   const [users, setUsers] = useState<AdminUser[]>([])
@@ -68,6 +84,12 @@ export default function Users() {
         )}
       </section>
 
+      {overview?.llm_looks_disabled && (
+        <p role="alert" data-cloud-warning className="rounded-xl border border-amber-400 bg-amber-50 p-4 text-sm font-medium text-amber-900 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-200">
+          {CLOUD_DISABLED_WARNING}
+        </p>
+      )}
+
       {overview && (
         <section className={box} data-usage-overview>
           <h2 className="mb-2 font-semibold">雲端失敗改用本地的次數</h2>
@@ -75,7 +97,9 @@ export default function Users() {
             語言模型：今天 {overview.fallbacks.llm.today} 次，近 7 天 {overview.fallbacks.llm.week} 次　·　
             語音辨識：今天 {overview.fallbacks.stt.today} 次，近 7 天 {overview.fallbacks.stt.week} 次
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <CloudFailures title="雲端語言模型失敗原因" data={overview.cloud.llm} />
+          <CloudFailures title="雲端語音辨識失敗原因" data={overview.cloud.stt} />
+          <p className="mt-3 text-xs text-slate-500">
             次數多代表雲端常常失敗或被限流，本地模型會被拉去跑（慢、吃記憶體）。每人每天上限：{overview.limits.media} 支影片／Podcast、{overview.limits.audio_minutes} 分鐘音訊、{overview.limits.ai} 次 AI 請求（管理員不受限，台北時間午夜重置）。
           </p>
         </section>

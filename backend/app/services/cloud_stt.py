@@ -10,6 +10,7 @@ import httpx
 import numpy as np
 
 from app.config import settings
+from app.services import cloudlog
 
 SAMPLE_RATE = 16000
 MAX_TRIES = 4
@@ -29,17 +30,27 @@ def encode_mp3(samples: np.ndarray) -> bytes:
         input=pcm, capture_output=True,
     )
     if run.returncode != 0 or not run.stdout:
-        raise CloudSTTError("無法把音訊轉成 mp3（ffmpeg 失敗）")
+        raise _fail("無法把音訊轉成 mp3（ffmpeg 失敗）", cloudlog.OTHER, detail="ffmpeg failed to encode mp3")
     return run.stdout
 
 
-def http_message(response: httpx.Response) -> str:
-    code = response.status_code
+def _detail(response: httpx.Response) -> str:
     try:
         detail = response.json()["error"]["message"]
     except Exception:  # noqa: BLE001
         detail = response.text
-    detail = str(detail).strip().replace("\n", " ")[:200]
+    return str(detail).strip().replace("\n", " ")[:200]
+
+
+def _fail(message: str, error_class: str, *, status_code: int | None = None, detail: str = "") -> CloudSTTError:
+    """Log the failed call (services/cloudlog.py) and build the error to raise."""
+    cloudlog.record(cloudlog.STT, False, status_code=status_code, error_class=error_class, message=detail or message)
+    return CloudSTTError(message)
+
+
+def http_message(response: httpx.Response) -> str:
+    code = response.status_code
+    detail = _detail(response)
     if code in (401, 403):
         return f"語音辨識服務拒絕了 API 金鑰（HTTP {code}）：請到「設定」檢查金鑰"
     if code == 404:
@@ -84,7 +95,7 @@ def transcribe_mp3(audio: bytes, client: httpx.Client | None = None, sleep=time.
                 resp = client.post(url, headers=headers, files=files, data=data)
             except httpx.HTTPError as e:
                 if attempt == MAX_TRIES - 1:
-                    raise CloudSTTError(f"連不上語音辨識服務：{type(e).__name__}") from e
+                    raise _fail(f"連不上語音辨識服務：{type(e).__name__}", cloudlog.classify(e), detail=f"{type(e).__name__}: {e}") from e
                 sleep(2 * (attempt + 1))
                 continue
             if resp.status_code in (429, 500, 502, 503, 504) and attempt < MAX_TRIES - 1:
@@ -95,15 +106,17 @@ def transcribe_mp3(audio: bytes, client: httpx.Client | None = None, sleep=time.
                 sleep(min(wait, 60.0))
                 continue
             if resp.status_code >= 400:
-                raise CloudSTTError(http_message(resp))
+                raise _fail(http_message(resp), cloudlog.HTTP, status_code=resp.status_code, detail=_detail(resp))
             try:
-                return to_whisper_result(resp.json())
+                result = to_whisper_result(resp.json())
             except (ValueError, KeyError, TypeError) as e:
-                raise CloudSTTError("語音辨識服務的回覆格式不對，請確認 Base URL 是 OpenAI 相容的網址") from e
+                raise _fail("語音辨識服務的回覆格式不對，請確認 Base URL 是 OpenAI 相容的網址", cloudlog.INVALID_JSON, detail=f"unexpected reply: {resp.text[:100]}") from e
+            cloudlog.record(cloudlog.STT, True)
+            return result
     finally:
         if own:
             client.close()
-    raise CloudSTTError("語音辨識服務沒有回應")  # unreachable: the loop returns or raises
+    raise _fail("語音辨識服務沒有回應", cloudlog.OTHER)  # unreachable: the loop returns or raises
 
 
 def transcribe_samples(samples: np.ndarray) -> dict:

@@ -301,10 +301,27 @@ export interface FallbackCounts {
   week: number
 }
 
-/** The daily limits, and how often the cloud service failed and the local model took over. */
+export interface CloudReason {
+  error_class: 'timeout' | 'connection' | 'http' | 'invalid_json' | 'other'
+  status_code: number | null
+  today: number
+  week: number
+}
+
+/** Failed calls to one cloud service: counts by reason and the latest one. */
+export interface CloudSummary {
+  calls_today: number
+  reasons: CloudReason[]
+  last_failure: { at: string; error_class: string; status_code: number | null; message: string } | null
+}
+
+/** The daily limits, how often the cloud service failed and the local model took over, and why the calls failed. */
 export interface AdminUsage {
   limits: { media: number; audio_minutes: number; ai: number }
   fallbacks: { llm: FallbackCounts; stt: FallbackCounts }
+  cloud: { llm: CloudSummary; stt: CloudSummary }
+  /** The last few cloud model calls were all refused with 403 / FreeTierError. */
+  llm_looks_disabled: boolean
   resets_at: string
 }
 

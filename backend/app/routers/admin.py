@@ -5,7 +5,7 @@ from sqlmodel import Session, col, select
 from app.db import get_session
 from app.deps import admin_user
 from app.models import Invite, User
-from app.services import auth, usage
+from app.services import auth, cloudlog, usage
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(admin_user)])
 
@@ -55,12 +55,14 @@ def list_users(session: Session = Depends(get_session)):
 
 @router.get("/usage")
 def usage_overview(session: Session = Depends(get_session)):
-    """The daily limits, and how often the cloud service failed and this Mac did the work instead."""
+    """The daily limits, how often the cloud service failed and this Mac did the work instead, and why the cloud calls failed."""
     limits, fallbacks = usage.limits(), usage.fallback_counts(session)
     return {
         "limits": {"media": limits[usage.MEDIA], "audio_minutes": limits[usage.AUDIO_MINUTES], "ai": limits[usage.AI]},
         "fallbacks": {"llm": fallbacks[usage.FALLBACK_LLM], "stt": fallbacks[usage.FALLBACK_STT]},
         "resets_at": usage.next_reset().isoformat(),
+        "cloud": {"llm": cloudlog.summary(session, cloudlog.LLM), "stt": cloudlog.summary(session, cloudlog.STT)},
+        "llm_looks_disabled": cloudlog.llm_looks_disabled(session),
     }
 
 
