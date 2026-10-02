@@ -65,3 +65,25 @@ def test_a_bare_health_check_is_not_limited(anon_client, monkeypatch):
     monkeypatch.setattr(settings, "rate_limit_api_per_minute", 1)
     for _ in range(5):
         assert anon_client.get("/api/health").status_code == 200
+
+
+def test_uvicorns_proxy_header_handling_and_ours_agree():
+    """With --proxy-headers uvicorn rewrites request.client before our code runs; the answer must not change."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    app = FastAPI()
+
+    @app.get("/ip")
+    def ip(request: Request):
+        return {"ip": ratelimit.client_ip(request)}
+
+    behind_uvicorn = TestClient(ProxyHeadersMiddleware(app, trusted_hosts="127.0.0.1"), client=("127.0.0.1", 5000))
+    alone = TestClient(app, client=("127.0.0.1", 5000))
+    for forwarded in ("203.0.113.9", "1.2.3.4, 203.0.113.9", "6.6.6.6, 7.7.7.7, 203.0.113.9"):
+        got = [c.get("/ip", headers={"X-Forwarded-For": forwarded}).json()["ip"] for c in (behind_uvicorn, alone)]
+        assert got == ["203.0.113.9", "203.0.113.9"], forwarded
+    for peer in ("192.168.1.20", "100.64.0.7"):  # not the proxy: the header is ignored by both
+        for c in (TestClient(ProxyHeadersMiddleware(app, trusted_hosts="127.0.0.1"), client=(peer, 5000)), TestClient(app, client=(peer, 5000))):
+            assert c.get("/ip", headers={"X-Forwarded-For": "203.0.113.9"}).json()["ip"] == peer

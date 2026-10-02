@@ -26,7 +26,7 @@ ollama serve            # 另開一個終端機（已經在背景執行就不用
 cd backend && uv run python scripts/create_admin.py <帳號>
 ```
 
-之後管理員在「👥 使用者」頁產生邀請連結給別人註冊；只有管理員能看設定頁、刪除影片／書／訂閱。登入 cookie 預設只在 https 傳送；`start.sh` 在本機 http 使用時自動設 `COOKIE_SECURE=false`，用 `fastapi dev` 時請自己加上同一個環境變數。
+之後管理員在「👥 使用者」頁產生邀請連結給別人註冊；只有管理員能看設定頁、刪除影片／書／訂閱。登入 cookie 預設只在 https 傳送；`start.sh` 在本機 http 使用時自動設 `COOKIE_SECURE=false`，用 `fastapi dev` 時請自己加上同一個環境變數。對外開放（Mac mini）請改用 `./scripts/start-prod.sh`：只綁 127.0.0.1:8000、信任本機代理（Tailscale Funnel）送來的 `X-Forwarded-For`，且拒絕在 `COOKIE_SECURE=false` 下啟動。
 
 ## 開發
 

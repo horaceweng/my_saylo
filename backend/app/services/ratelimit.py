@@ -49,7 +49,10 @@ def hit(key: str, limit: int, what: str, now: float | None = None) -> None:
 
 def client_ip(request: Request) -> str:
     """The caller's address. X-Forwarded-For is only believed when the direct peer is this machine (the Tailscale
-    Funnel proxy); then its last entry is the one our own proxy added, earlier ones can be made up by the caller."""
+    Funnel proxy); then its last entry is the one our own proxy added, earlier ones can be made up by the caller.
+    Started with `--proxy-headers --forwarded-allow-ips 127.0.0.1` (scripts/start-prod.sh), uvicorn has already put
+    that same address into request.client, so the peer here is the real caller and the header is not read a second
+    time; without those flags this function does the job alone. Both ways give the same answer."""
     peer = request.client.host if request.client else "unknown"
     if peer == "127.0.0.1":
         forwarded = request.headers.get("x-forwarded-for", "")
