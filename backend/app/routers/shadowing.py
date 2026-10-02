@@ -10,7 +10,8 @@ from sqlmodel import Session, col, select
 
 from app.config import settings
 from app.db import get_session
-from app.models import Media, Recording, Segment
+from app.deps import current_user
+from app.models import Media, Recording, Segment, User
 from app.services import prompts, shadowing
 from app.services.llm import LLMError, chat_json, make_provider
 from app.services.partial_json import parse_partial
@@ -65,7 +66,7 @@ def sentence_audio(segment_id: int, session: Session = Depends(get_session)):
 
 
 @router.post("/segments/{segment_id}/recordings")
-async def upload_recording(segment_id: int, file: UploadFile, session: Session = Depends(get_session)):
+async def upload_recording(segment_id: int, file: UploadFile, session: Session = Depends(get_session), user: User = Depends(current_user)):
     """Take a recording of the learner, recognise it and compare it word by word with the sentence."""
     seg = _segment(session, segment_id)
     data = await file.read(MAX_UPLOAD_BYTES + 1)
@@ -74,7 +75,7 @@ async def upload_recording(segment_id: int, file: UploadFile, session: Session =
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "錄音檔太大")
 
-    folder = _dir("recordings")
+    folder = _dir(f"recordings/{user.id}")  # one folder per learner; older files stay where the database says
     token = uuid.uuid4().hex
     raw, wav = folder / f"{token}.upload", folder / f"{token}.wav"
     try:
@@ -100,7 +101,7 @@ async def upload_recording(segment_id: int, file: UploadFile, session: Session =
 
     result = shadowing.compare(seg.text, words)
     rec = Recording(
-        segment_id=seg.id, file_path=str(wav), duration=round(duration, 2), score=result.score,
+        segment_id=seg.id, user_id=user.id, file_path=str(wav), duration=round(duration, 2), score=result.score,
         heard_text=" ".join(w.text.strip() for w in words), diff_json=json.dumps(result.to_json_list(), ensure_ascii=False),
     )
     session.add(rec)
@@ -110,30 +111,30 @@ async def upload_recording(segment_id: int, file: UploadFile, session: Session =
 
 
 @router.get("/segments/{segment_id}/recordings")
-def list_recordings(segment_id: int, session: Session = Depends(get_session)):
+def list_recordings(segment_id: int, session: Session = Depends(get_session), user: User = Depends(current_user)):
     _segment(session, segment_id)
-    rows = session.exec(select(Recording).where(Recording.segment_id == segment_id).order_by(col(Recording.created_at).desc())).all()
+    rows = session.exec(select(Recording).where(Recording.segment_id == segment_id, Recording.user_id == user.id).order_by(col(Recording.created_at).desc())).all()
     return [_out(r) for r in rows]
 
 
-def _recording(session: Session, recording_id: int) -> Recording:
+def _recording(session: Session, recording_id: int, user: User) -> Recording:
     rec = session.get(Recording, recording_id)
-    if not rec:
+    if not rec or rec.user_id != user.id:  # someone else's recording looks the same as a missing one
         raise HTTPException(404, "找不到這筆錄音")
     return rec
 
 
 @router.get("/recordings/{recording_id}/audio")
-def recording_audio(recording_id: int, session: Session = Depends(get_session)):
-    rec = _recording(session, recording_id)
+def recording_audio(recording_id: int, session: Session = Depends(get_session), user: User = Depends(current_user)):
+    rec = _recording(session, recording_id, user)
     if not Path(rec.file_path).exists():
         raise HTTPException(404, "錄音檔已不存在")
     return FileResponse(rec.file_path, media_type="audio/wav")
 
 
 @router.delete("/recordings/{recording_id}")
-def delete_recording(recording_id: int, session: Session = Depends(get_session)):
-    rec = _recording(session, recording_id)
+def delete_recording(recording_id: int, session: Session = Depends(get_session), user: User = Depends(current_user)):
+    rec = _recording(session, recording_id, user)
     Path(rec.file_path).unlink(missing_ok=True)
     session.delete(rec)
     session.commit()
@@ -141,9 +142,11 @@ def delete_recording(recording_id: int, session: Session = Depends(get_session))
 
 
 @router.post("/recordings/{recording_id}/feedback/stream")
-async def feedback_stream(recording_id: int, session: Session = Depends(get_session), provider=Depends(get_feedback_provider)):
+async def feedback_stream(
+    recording_id: int, session: Session = Depends(get_session), provider=Depends(get_feedback_provider), user: User = Depends(current_user)
+):
     """AI comments on one attempt, streamed as newline-delimited JSON (partial… then done or error)."""
-    rec = _recording(session, recording_id)
+    rec = _recording(session, recording_id, user)
     seg = _segment(session, rec.segment_id)
     bind, saved = session.get_bind(), rec.feedback_json
     reference, heard, score = seg.text, rec.heard_text, rec.score

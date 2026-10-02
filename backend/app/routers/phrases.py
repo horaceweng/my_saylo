@@ -3,8 +3,8 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, col, or_, select
 
 from app.db import get_session
-
-from app.models import SavedPhrase
+from app.deps import current_user
+from app.models import SavedPhrase, User
 from app.services import srs
 
 router = APIRouter(prefix="/api/phrases", tags=["phrases"])
@@ -21,14 +21,14 @@ class PhraseIn(BaseModel):
 
 
 @router.post("")
-def save_phrase(body: PhraseIn, session: Session = Depends(get_session)):
+def save_phrase(body: PhraseIn, session: Session = Depends(get_session), user: User = Depends(current_user)):
     text = body.text.strip()
     dup = session.exec(
-        select(SavedPhrase).where(SavedPhrase.text == text, SavedPhrase.source_id == body.source_id)
+        select(SavedPhrase).where(SavedPhrase.user_id == user.id, SavedPhrase.text == text, SavedPhrase.source_id == body.source_id)
     ).first()
     if dup:
         return dup
-    phrase = SavedPhrase(**{**body.model_dump(), "text": text})
+    phrase = SavedPhrase(**{**body.model_dump(), "text": text, "user_id": user.id})
     session.add(phrase)
     session.commit()
     session.refresh(phrase)
@@ -36,8 +36,8 @@ def save_phrase(body: PhraseIn, session: Session = Depends(get_session)):
 
 
 @router.get("")
-def list_phrases(q: str = "", session: Session = Depends(get_session)):
-    stmt = select(SavedPhrase).order_by(col(SavedPhrase.created_at).desc())
+def list_phrases(q: str = "", session: Session = Depends(get_session), user: User = Depends(current_user)):
+    stmt = select(SavedPhrase).where(SavedPhrase.user_id == user.id).order_by(col(SavedPhrase.created_at).desc())
     if q.strip():
         like = f"%{q.strip()}%"
         stmt = stmt.where(or_(col(SavedPhrase.text).like(like), col(SavedPhrase.translation).like(like)))
@@ -49,12 +49,12 @@ class ReviewIn(BaseModel):
 
 
 @router.get("/review")
-def phrases_to_review(limit: int = 20, session: Session = Depends(get_session)):
+def phrases_to_review(limit: int = 20, session: Session = Depends(get_session), user: User = Depends(current_user)):
     """The phrases whose time has come, oldest first, plus how many are waiting in all."""
     now = srs.utcnow()
     due = col(SavedPhrase.due_at) <= now
-    cards = session.exec(select(SavedPhrase).where(due).order_by(col(SavedPhrase.due_at)).limit(max(1, min(limit, 100)))).all()
-    everything = session.exec(select(SavedPhrase)).all()
+    cards = session.exec(select(SavedPhrase).where(SavedPhrase.user_id == user.id, due).order_by(col(SavedPhrase.due_at)).limit(max(1, min(limit, 100)))).all()
+    everything = session.exec(select(SavedPhrase).where(SavedPhrase.user_id == user.id)).all()
     upcoming = [p.due_at for p in everything if p.due_at > now]
     return {
         "cards": cards, "due_count": sum(1 for p in everything if p.due_at <= now), "total": len(everything),
@@ -63,10 +63,10 @@ def phrases_to_review(limit: int = 20, session: Session = Depends(get_session)):
 
 
 @router.post("/{phrase_id}/review")
-def review_phrase(phrase_id: int, body: ReviewIn, session: Session = Depends(get_session)):
+def review_phrase(phrase_id: int, body: ReviewIn, session: Session = Depends(get_session), user: User = Depends(current_user)):
     """Record how a review went and set when the phrase comes back."""
     phrase = session.get(SavedPhrase, phrase_id)
-    if not phrase:
+    if not phrase or phrase.user_id != user.id:
         raise HTTPException(404, "找不到這個片語")
     card, due = srs.schedule(srs.Card(phrase.reps, phrase.interval_days, phrase.ease, phrase.lapses), body.grade)
     phrase.reps, phrase.interval_days, phrase.ease, phrase.lapses, phrase.due_at = card.reps, card.interval_days, card.ease, card.lapses, due
@@ -77,9 +77,9 @@ def review_phrase(phrase_id: int, body: ReviewIn, session: Session = Depends(get
 
 
 @router.delete("/{phrase_id}")
-def delete_phrase(phrase_id: int, session: Session = Depends(get_session)):
+def delete_phrase(phrase_id: int, session: Session = Depends(get_session), user: User = Depends(current_user)):
     phrase = session.get(SavedPhrase, phrase_id)
-    if not phrase:
+    if not phrase or phrase.user_id != user.id:
         raise HTTPException(404, "找不到這個片語")
     session.delete(phrase)
     session.commit()
