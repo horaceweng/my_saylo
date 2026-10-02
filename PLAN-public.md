@@ -31,20 +31,20 @@ OpenCode Zen 免費模型的注意事項（2026-10 查證）：免費模型是�
 ## Phase 1 — 帳號與資料分人（程式，Sonnet）
 
 後端
-- [ ] 1.1 新增依賴 `pwdlib[argon2]`（argon2 雜湊）
-- [ ] 1.2 新表：`User(id, username unique, password_hash, is_admin, disabled, created_at)`、`Invite(code pk, created_by, used_by, created_at, expires_at)`、`AuthSession(token_hash pk, user_id, created_at, expires_at, last_seen)`
-- [ ] 1.3 `SavedPhrase`、`Recording` 加 `user_id`（經由 `db.py` 的 `_LATER_COLUMNS`，舊資料歸給第一個管理員）；`Media`、`Book`、`Feed` 加 `added_by`（只做紀錄/配額，不限制看得到）。錄音檔案路徑改 `data/recordings/<user_id>/`，舊檔不搬，路徑照 DB 記錄
-- [ ] 1.4 建立第一個管理員：`backend/scripts/create_admin.py <username>`（互動輸入密碼）；啟動時若沒有任何 User 就在 log 警告，不自動建立
-- [ ] 1.5 `app/routers/auth.py`：`POST /api/auth/login`、`POST /api/auth/logout`、`POST /api/auth/register`（需有效邀請碼）、`GET /api/auth/me`。Session 用隨機 token 存 HttpOnly + Secure + SameSite=Lax cookie，DB 只存 token 的 sha256；30 天到期
-- [ ] 1.6 `current_user` / `admin_user` dependency；除了 `/api/auth/*` 與精簡版 `/api/health`（未登入只回 `{ok}`）以外，所有 `/api/*` 都要登入。用 router 層級的 `dependencies=[...]` 套，不要每個端點各加
-- [ ] 1.7 片語、SRS 複習、錄音、shadowing 評語：查詢與修改都要以 `user_id` 過濾；存取別人的 id 回 404
-- [ ] 1.8 管理員限定：`/api/settings` 全部（讀和寫）、刪除共享內容（影片/書/新聞源/Podcast 頻道）、`/api/admin/*`（邀請碼產生/列表、使用者列表/停用）
-- [ ] 1.9 測試：`tests/conftest.py` 加已登入/管理員/另一位使用者的 client fixture；既有測試改用已登入 client；新增 `test_auth.py`（登入、錯誤密碼、邀請碼只能用一次、過期、停用帳號、session 過期）與「A 看不到 B 的片語/錄音」測試
+- [x] 1.1 新增依賴 `pwdlib[argon2]`（argon2 雜湊）
+- [x] 1.2 新表：`User(id, username unique, password_hash, is_admin, disabled, created_at)`、`Invite(code pk, created_by, used_by, created_at, expires_at)`、`AuthSession(token_hash pk, user_id, created_at, expires_at, last_seen)`
+- [x] 1.3 `SavedPhrase`、`Recording` 加 `user_id`（經由 `db.py` 的 `_LATER_COLUMNS`，舊資料歸給第一個管理員）；`Media`、`Book`、`Feed` 加 `added_by`（只做紀錄/配額，不限制看得到）。錄音檔案路徑改 `data/recordings/<user_id>/`，舊檔不搬，路徑照 DB 記錄
+- [x] 1.4 建立第一個管理員：`backend/scripts/create_admin.py <username>`（互動輸入密碼）；啟動時若沒有任何 User 就在 log 警告，不自動建立
+- [x] 1.5 `app/routers/auth.py`：`POST /api/auth/login`、`POST /api/auth/logout`、`POST /api/auth/register`（需有效邀請碼）、`GET /api/auth/me`。Session 用隨機 token 存 HttpOnly + Secure + SameSite=Lax cookie，DB 只存 token 的 sha256；30 天到期
+- [x] 1.6 `current_user` / `admin_user` dependency；除了 `/api/auth/*` 與精簡版 `/api/health`（未登入只回 `{ok}`）以外，所有 `/api/*` 都要登入。用 router 層級的 `dependencies=[...]` 套，不要每個端點各加
+- [x] 1.7 片語、SRS 複習、錄音、shadowing 評語：查詢與修改都要以 `user_id` 過濾；存取別人的 id 回 404
+- [x] 1.8 管理員限定：`/api/settings` 全部（讀和寫）、刪除共享內容（影片/書/新聞源/Podcast 頻道）、`/api/admin/*`（邀請碼產生/列表、使用者列表/停用）
+- [x] 1.9 測試：`tests/conftest.py` 加已登入/管理員/另一位使用者的 client fixture；既有測試改用已登入 client；新增 `test_auth.py`（登入、錯誤密碼、邀請碼只能用一次、過期、停用帳號、session 過期）與「A 看不到 B 的片語/錄音」測試
 
 前端
-- [ ] 1.10 登入頁、邀請碼註冊頁（`/register?code=…`）、右上角使用者名稱 + 登出
-- [ ] 1.11 `api/client.ts` 收到 401 → 導向登入頁；串流端點（ndjson）也要處理
-- [ ] 1.12 非管理員隱藏設定頁入口；管理員多一個「使用者」頁：產生邀請連結（可複製）、使用者列表、停用
+- [x] 1.10 登入頁、邀請碼註冊頁（`/register?code=…`）、右上角使用者名稱 + 登出
+- [x] 1.11 `api/client.ts` 收到 401 → 導向登入頁；串流端點（ndjson）也要處理
+- [x] 1.12 非管理員隱藏設定頁入口；管理員多一個「使用者」頁：產生邀請連結（可複製）、使用者列表、停用
 
 驗證：`uv run pytest`、`npm run build`、`npm test` 全過；本機啟動後手動走一次：建管理員 → 產生邀請 → 無痕視窗註冊第二個帳號 → 兩邊各存片語互相看不到 → 第二個帳號看不到設定頁、打 `/api/settings` 回 403。
 
