@@ -102,10 +102,20 @@ class Book(SQLModel, table=True):
     url: str = ""  # the original page, for a news article
     published: str = ""  # YYYY-MM-DD
     site: str = ""  # "BBC News", "VOA Learning English" …
-    last_chapter: int = 0  # reading position: chapter index …
-    last_paragraph: int = 0  # … and the paragraph's index within the whole book
+    last_chapter: int = 0  # legacy shared position: moved into the first admin's BookProgress, unused since (see claim_ownerless_rows)
+    last_paragraph: int = 0
     added_by: int | None = Field(default=None, foreign_key="user.id")
     created_at: datetime = Field(default_factory=_now)
+
+
+class BookProgress(SQLModel, table=True):
+    """Where one user stopped reading one book (a saved news article is a book too)."""
+
+    user_id: int = Field(foreign_key="user.id", primary_key=True)
+    book_id: int = Field(foreign_key="book.id", primary_key=True)
+    last_chapter: int = 0  # chapter index …
+    last_paragraph: int = 0  # … and the paragraph's index within the whole book
+    updated_at: datetime = Field(default_factory=_now)
 
 
 class Chapter(SQLModel, table=True):

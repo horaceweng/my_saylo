@@ -217,3 +217,41 @@ def test_saved_books_are_graded_again_once_when_the_grading_method_changes():
         s.add(book)
         s.commit()
     assert regrade_all(engine) == 1
+
+
+def _seeded_book(session):
+    book = Book(title="Shared", source_key="shared", chapter_count=3, paragraph_count=6)
+    session.add(book)
+    session.commit()
+    return book.id
+
+
+def test_reading_progress_is_per_user(client, user_client, other_client, session):
+    book_id = _seeded_book(session)
+    assert user_client.put(f"/api/books/{book_id}/progress", json={"chapter": 2, "paragraph": 4}).json() == {"ok": True}
+    mine = user_client.get(f"/api/books/{book_id}").json()
+    assert (mine["last_chapter"], mine["last_paragraph"], mine["progress_percent"]) == (2, 4, 83)
+    for c in (other_client, client):  # another user and the admin still stand at the start
+        theirs = c.get(f"/api/books/{book_id}").json()
+        assert (theirs["last_chapter"], theirs["last_paragraph"], theirs["progress_percent"]) == (0, 0, 0)
+        assert c.get("/api/books").json()[0]["last_paragraph"] == 0
+    other_client.put(f"/api/books/{book_id}/progress", json={"chapter": 1, "paragraph": 1})
+    assert user_client.get("/api/books").json()[0]["last_paragraph"] == 4  # B saving did not move A
+    assert other_client.get("/api/books").json()[0]["last_paragraph"] == 1
+    user_client.put(f"/api/books/{book_id}/progress", json={"chapter": 0, "paragraph": 2})  # saving again replaces, not adds
+    assert user_client.get(f"/api/books/{book_id}").json()["last_paragraph"] == 2
+
+
+def test_the_old_shared_position_goes_to_the_first_admin_only(client, other_client, session):
+    from app.services import auth
+
+    book_id = _seeded_book(session)
+    session.get(Book, book_id).last_chapter = 1
+    session.get(Book, book_id).last_paragraph = 3
+    session.commit()
+    assert other_client.get(f"/api/books/{book_id}").json()["last_paragraph"] == 0  # not shown to anybody before the claim
+    admin_id = client.get("/api/auth/me").json()["id"]
+    auth.claim_ownerless_rows(session, admin_id)
+    assert client.get(f"/api/books/{book_id}").json()["last_paragraph"] == 3
+    assert other_client.get(f"/api/books/{book_id}").json()["last_paragraph"] == 0
+    assert auth.claim_ownerless_rows(session, admin_id) == 0  # the old value was cleared: nothing left to hand over

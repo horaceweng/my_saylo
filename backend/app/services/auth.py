@@ -9,7 +9,7 @@ from pwdlib import PasswordHash
 from sqlmodel import Session, col, delete, select, update
 
 from app.config import settings
-from app.models import AuthSession, Invite, Recording, SavedPhrase, User
+from app.models import AuthSession, Book, BookProgress, Invite, Recording, SavedPhrase, User
 
 COOKIE = "session"
 _hasher = PasswordHash.recommended()
@@ -70,6 +70,14 @@ def claim_ownerless_rows(session: Session, user_id: int) -> int:
     for model in (SavedPhrase, Recording):
         result = session.exec(update(model).where(col(model.user_id).is_(None)).values(user_id=user_id))
         total += result.rowcount or 0
+    # The one reading position that used to be shared by everyone goes to the first admin; once moved it is cleared,
+    # so running this again for another admin hands over nothing.
+    for book in session.exec(select(Book).where((Book.last_chapter != 0) | (Book.last_paragraph != 0))).all():
+        if session.get(BookProgress, (user_id, book.id)) is None:
+            session.add(BookProgress(user_id=user_id, book_id=book.id, last_chapter=book.last_chapter, last_paragraph=book.last_paragraph))
+            total += 1
+        book.last_chapter = book.last_paragraph = 0
+        session.add(book)
     session.commit()
     return total
 

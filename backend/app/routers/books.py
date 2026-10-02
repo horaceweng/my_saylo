@@ -3,6 +3,7 @@ import hashlib
 import json
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
@@ -13,7 +14,7 @@ from sqlmodel import Session, col, delete, func, select
 from app.config import settings
 from app.db import get_session
 from app.deps import admin_user, current_user
-from app.models import Book, Chapter, Paragraph, Setting, User
+from app.models import Book, BookProgress, Chapter, Paragraph, Setting, User
 from app.services import books, gutenberg, grading, prompts, uploads, usage
 from app.services.books import BookError, ParsedBook
 from app.services.gutenberg import GutenbergError
@@ -38,9 +39,19 @@ class Progress(BaseModel):
     paragraph: int
 
 
-def book_out(book: Book) -> dict:
-    percent = round(100 * (book.last_paragraph + 1) / book.paragraph_count) if book.paragraph_count and book.last_paragraph else 0
-    return {**book.model_dump(), "progress_percent": min(100, percent)}
+def book_out(book: Book, progress: BookProgress | None = None) -> dict:
+    """The book as the API shows it. `last_chapter`/`last_paragraph` are the asking user's own position (0 when none)."""
+    chapter, paragraph = (progress.last_chapter, progress.last_paragraph) if progress else (0, 0)
+    percent = round(100 * (paragraph + 1) / book.paragraph_count) if book.paragraph_count and paragraph else 0
+    return {**book.model_dump(), "last_chapter": chapter, "last_paragraph": paragraph, "progress_percent": min(100, percent)}
+
+
+def progress_of(session: Session, user_id: int, book_id: int) -> BookProgress | None:
+    return session.get(BookProgress, (user_id, book_id))
+
+
+def progress_by_book(session: Session, user_id: int) -> dict[int, BookProgress]:
+    return {p.book_id: p for p in session.exec(select(BookProgress).where(BookProgress.user_id == user_id)).all()}
 
 
 def store_book(
@@ -95,7 +106,7 @@ def _existing(session: Session, source_key: str) -> Book | None:
 
 
 @router.get("")
-def list_books(level: str | None = None, kind: str = "book", session: Session = Depends(get_session)):
+def list_books(level: str | None = None, kind: str = "book", session: Session = Depends(get_session), user: User = Depends(current_user)):
     """`kind=book` (default): books; `kind=news`: saved news articles, which are stored the same way."""
     stmt = select(Book).order_by(col(Book.created_at).desc())
     stmt = stmt.where(Book.source == "news") if kind == "news" else stmt.where(Book.source != "news")
@@ -103,7 +114,8 @@ def list_books(level: str | None = None, kind: str = "book", session: Session = 
         if level not in LEVELS:
             raise HTTPException(400, f"等級必須是 {'、'.join(LEVELS)}")
         stmt = stmt.where(Book.level == level)
-    return [book_out(b) for b in session.exec(stmt).all()]
+    mine = progress_by_book(session, user.id)
+    return [book_out(b, mine.get(b.id)) for b in session.exec(stmt).all()]
 
 
 @router.get("/search")
@@ -118,7 +130,7 @@ async def search_gutenberg(q: str):
 async def add_from_gutenberg(body: GutenbergRequest, session: Session = Depends(get_session), user: User = Depends(current_user)):
     key = f"gutenberg:{body.id}"
     if found := _existing(session, key):
-        return book_out(found)
+        return book_out(found, progress_of(session, user.id, found.id))
     bind, user_id = session.get_bind(), user.id
 
     def work() -> Book:
@@ -154,7 +166,7 @@ async def upload_book(file: UploadFile, session: Session = Depends(get_session),
             raise HTTPException(400, "這不是文字檔")
         key = f"sha1:{digest}"
         if found := _existing(session, key):
-            return book_out(found)
+            return book_out(found, progress_of(session, user.id, found.id))
         bind, user_id = session.get_bind(), user.id
 
         def work() -> Book:
@@ -183,7 +195,7 @@ def _book(session: Session, book_id: int) -> Book:
 
 
 @router.get("/{book_id}")
-def get_book(book_id: int, session: Session = Depends(get_session)):
+def get_book(book_id: int, session: Session = Depends(get_session), user: User = Depends(current_user)):
     book = _book(session, book_id)
     chapters = session.exec(select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.idx)).all()
     first_index, chapter_starts = 0, []
@@ -191,7 +203,7 @@ def get_book(book_id: int, session: Session = Depends(get_session)):
         chapter_starts.append(first_index)
         first_index += chapter.paragraph_count
     return {
-        **book_out(book),
+        **book_out(book, progress_of(session, user.id, book_id)),
         "chapters": [
             {"idx": c.idx, "title": c.title, "paragraph_count": c.paragraph_count, "word_count": c.word_count, "first_paragraph": start}
             for c, start in zip(chapters, chapter_starts)
@@ -212,12 +224,13 @@ def get_chapter(book_id: int, chapter_idx: int, session: Session = Depends(get_s
 
 
 @router.put("/{book_id}/progress")
-def save_progress(book_id: int, body: Progress, session: Session = Depends(get_session)):
+def save_progress(book_id: int, body: Progress, session: Session = Depends(get_session), user: User = Depends(current_user)):
     book = _book(session, book_id)
     if not 0 <= body.chapter < book.chapter_count or not 0 <= body.paragraph < max(1, book.paragraph_count):
         raise HTTPException(400, "閱讀位置不正確")
-    book.last_chapter, book.last_paragraph = body.chapter, body.paragraph
-    session.add(book)
+    row = progress_of(session, user.id, book_id) or BookProgress(user_id=user.id, book_id=book_id)
+    row.last_chapter, row.last_paragraph, row.updated_at = body.chapter, body.paragraph, datetime.now(timezone.utc)
+    session.add(row)
     session.commit()
     return {"ok": True}
 
@@ -227,6 +240,7 @@ def delete_book(book_id: int, session: Session = Depends(get_session), _: User =
     _book(session, book_id)
     session.exec(delete(Paragraph).where(Paragraph.book_id == book_id))
     session.exec(delete(Chapter).where(Chapter.book_id == book_id))
+    session.exec(delete(BookProgress).where(BookProgress.book_id == book_id))
     session.exec(delete(Book).where(Book.id == book_id))
     session.commit()
     return {"ok": True}

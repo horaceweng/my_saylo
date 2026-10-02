@@ -7,7 +7,7 @@ from sqlmodel import Session, col, func, select
 from app.db import engine, get_session
 from app.deps import admin_user, current_user
 from app.models import Book, Feed, Setting, User
-from app.routers.books import book_out, store_book
+from app.routers.books import book_out, progress_of, store_book
 from app.services import books, news
 from app.services.books import BookError, ParsedBook, ParsedChapter
 from app.services.news import NewsError
@@ -102,7 +102,7 @@ async def add_article(body: ArticleIn, session: Session = Depends(get_session), 
         raise HTTPException(400, str(e)) from e
     key = news.url_key(url)
     if found := session.exec(select(Book).where(Book.source_key == key)).first():
-        return book_out(found)
+        return book_out(found, progress_of(session, user.id, found.id))
     bind, user_id = session.get_bind(), user.id
 
     def work() -> Book:
