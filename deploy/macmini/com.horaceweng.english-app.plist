@@ -18,12 +18,22 @@
         <key>PATH</key>
         <string>/Users/horacemac/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>ThrottleInterval</key>
-    <integer>10</integer>
+    <!-- On demand: launchd listens on 127.0.0.1:8000 and starts the app on the first connection; the app exits by
+         itself after 15 idle minutes (backend/app/ondemand.py), so nothing runs while nobody uses it. -->
+    <key>Sockets</key>
+    <dict>
+        <key>Listeners</key>
+        <dict>
+            <key>SockNodeName</key>
+            <string>127.0.0.1</string>
+            <key>SockServiceName</key>
+            <string>8000</string>
+            <key>SockType</key>
+            <string>stream</string>
+            <key>SockFamily</key>
+            <string>IPv4</string>
+        </dict>
+    </dict>
     <key>StandardOutPath</key>
     <string>/Users/horacemac/Library/Logs/EnglishApp/out.log</string>
     <key>StandardErrorPath</key>

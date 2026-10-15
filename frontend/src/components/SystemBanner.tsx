@@ -30,9 +30,18 @@ export default function SystemBanner() {
       api.health()
         .then((h) => !stop && setProblems(problemsOf(h, false)))
         .catch(() => !stop && setProblems(problemsOf(null, true)))
-    check()
-    const timer = setInterval(check, POLL_MS)
-    return () => { stop = true; clearInterval(timer) }
+    // Only while the tab is in front: a tab left open in the background must not keep the server awake (it exits
+    // when idle, see backend/app/ondemand.py). Coming back to the tab checks right away.
+    let timer: ReturnType<typeof setInterval> | undefined
+    const start = () => { check(); timer = setInterval(check, POLL_MS) }
+    const onVisibility = () => {
+      clearInterval(timer)
+      timer = undefined
+      if (document.visibilityState === 'visible') start()
+    }
+    if (document.visibilityState === 'visible') start()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => { stop = true; clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
   }, [])
 
   const text = problems.join('\n')

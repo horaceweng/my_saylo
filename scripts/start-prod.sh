@@ -37,4 +37,9 @@ if [ "${COOKIE_SECURE:-true}" = "false" ] || grep -qiE '^[[:space:]]*COOKIE_SECU
 fi
 echo "開啟 http://127.0.0.1:8000（只有本機可連，外部經由 Tailscale Funnel；之後這裡只會顯示警告與錯誤，按 Ctrl+C 結束）"
 # Quiet unless something goes wrong: no start-up banner, no line per request; warnings and errors still show.
-exec uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1 --log-level warning --no-access-log
+# Started by launchd with its socket (deploy/macmini), the server runs only while it is used and exits when idle;
+# run by hand it listens on 127.0.0.1:8000 itself and keeps running (see app/ondemand.py).
+# Not `uv run`: that starts Python as a child process, and launchd only hands its socket to the process it started
+# itself, so sync first and then replace this shell with Python.
+uv sync --frozen --quiet </dev/null
+exec .venv/bin/python -m app.ondemand

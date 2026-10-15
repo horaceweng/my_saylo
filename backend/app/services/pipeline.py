@@ -122,6 +122,12 @@ def enqueue(media_id: int) -> None:
             _worker.start()
 
 
+def busy() -> bool:
+    """Is a job running or waiting? (The on-demand server must not exit then; see app/ondemand.py.)"""
+    with _state:
+        return bool(_queued)
+
+
 def _worker_loop() -> None:
     global _running
     while True:

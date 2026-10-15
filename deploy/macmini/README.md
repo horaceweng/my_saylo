@@ -4,7 +4,7 @@
 
 本資料夾內容：
 
-- `com.horaceweng.english-app.plist`：開機／登入後自動跑 `scripts/start-prod.sh`（綁 127.0.0.1:8000），掛了自動重啟
+- `com.horaceweng.english-app.plist`：隨需啟動。launchd 代為監聽 127.0.0.1:8000，有連線進來才跑 `scripts/start-prod.sh`（約 1.5 秒）；app 15 分鐘沒有請求、也沒有影片／Podcast 在處理或本地模型在用時自己結束（`backend/app/ondemand.py`），沒人用時不佔記憶體。掛了也一樣，下一個連線會再啟動
 - `com.horaceweng.english-app-backup.plist`：每天 04:00 跑 `scripts/backup.sh`
 
 ## 0. 先確認
@@ -149,7 +149,8 @@ sudo pmset -a autorestart 1     # 停電後自動開機
 ## 日常指令
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.horaceweng.english-app   # 重啟 app（更新程式後）
+pkill -f app.ondemand                                             # 更新程式後：結束目前的 app，下一個連線就跑新程式
+# 改了 plist 要 bootout 再 bootstrap（kickstart 會沿用已載入的舊 plist）
 tail -f ~/Library/Logs/EnglishApp/err.log
 ```
 
